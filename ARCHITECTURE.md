@@ -695,3 +695,24 @@ releases per lap per CPU; ≥ 15 place changes; ≥ 4 item uses per CPU; autopil
 - No commits (the architect commits). No new npm/pip dependencies.
 - English in code and comments; Turkish in player-facing text. Comments only where
   they carry what the code cannot say.
+
+## 18. Visual language (everyone)
+
+Owner's criterion: *"does an outsider say this looks one of a kind, or does it
+read as a template?"* The character is **a pop-up book**, and every choice
+answers to it:
+- **Shadows have no blur** — hard offset shadows everywhere (world and UI).
+- **Systematic tilt** — UI cards and labels sit at small deterministic angles
+  (e.g. `rotate(±0.4–1.6deg)` from a fixed cycle), never all square.
+- **Designed irregularity, not randomness** — variation from index-based cycles
+  or seeded streams, so a re-render never jumps.
+- **Print texture** — paper grain, halftone dots, visible folds, slight
+  misregistration of colour plates; display type is cut-paper lettering (§13).
+- **Every motion does a job** — pop-ups reveal the road ahead, the page turn is
+  the scene transition, banners slam in once. No idle decorative animation.
+- **Reduced motion** — with `prefers-reduced-motion` or the setting: no screen
+  shake, pop-ups snap instead of spring, transitions become cuts; gameplay
+  motion is unchanged.
+- Ground palette per chapter; UI is two-tone (a mid-dark ink shell + muted paper
+  cards) — neither pure black nor bright white. Saturated colour is spent on
+  things that need attention (item slot, place, warnings); indicators stay calm.

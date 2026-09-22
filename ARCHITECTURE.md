@@ -716,3 +716,85 @@ answers to it:
 - Ground palette per chapter; UI is two-tone (a mid-dark ink shell + muted paper
   cards) — neither pure black nor bright white. Saturated colour is spent on
   things that need attention (item slot, place, warnings); indicators stay calm.
+
+## 19. Amendments from the core build (binding; they override earlier sections where they differ)
+
+- **§3/§13:** core ships the `src/ui/lettering.js` stub with the same signatures; UI replaces it.
+- **§6/§13 pause:**
+  - Core only opens the pause menu on `nav.pause` and uses up that press (`nav.pause`, and `nav.back` when the key was Esc, read false for the rest of that frame).
+  - Only UI closes it, with `api.setPaused(false)`.
+  - `pause {paused:false}` is emitted whenever setup, teardown or a phase change clears a pause.
+- **§7.5:**
+  - Snapshots are read after one render of the current scene.
+  - Listeners, scene objects, geometries and textures must all equal the pre-setup snapshot.
+  - A race with a quality change skips the GPU part.
+  - A module-level GPU cache filled during a race counts as a leak.
+- **§8.1 walls:**
+  - An impact is more than 1.5 m/s into the wall, on first contact or at least 0.3 s after the previous impact. It applies tangential ×0.92 and normal reflected ×0.25; above 45° the whole result is ×0.6 plus a 0.2 s steer lock. Drift cancels and `wallHit` fires.
+  - Sliding contact removes only the inward velocity, turns the nose along the wall at up to 2.5 rad/s (below 45°) and scrapes at −8 m/s².
+- **§8.1 respawn:** throttle held at any moment within ±0.25 s of touchdown gives the respawn-launch boost.
+- **§8:** `placeAt`/`teleport` cancel respawn, spin, steer lock, drift, hop and trick state.
+- **§9.2:**
+  - `trackQuery.js` exports `EDGE_CODES {none 0, wall 1, void 2, water 3}`, `EDGE_NAMES`, `SURF_CODES {road 0, ice 1, sand 2}`, `SURF_NAMES`.
+  - `samples.surface` packs both sides: left = `code & 3`, right = `(code >> 2) & 3`.
+  - Extra query fields: `edgeCode`, `hasGround`, `waterY`, `rampId`, `rampHeight`, `onLip`, `padId`, `centreY`, `edgeY`, `heading`, `curvature`.
+  - Beyond a void/water band, `groundY` is the edge height and `hasGround=false` marks the drop.
+  - Per-step code passes a reused `createQueryInfo()` as `out`.
+- **§10 audio:** `createAudio(game) → { ctx, unlock(), update(frameDt), dispose() }`, where `ctx` is the AudioContext or null. Core disarms the gesture listener once `ctx.state === 'running'`.
+- **§13 settings:** add `muted: false`; M → `api.toggleMute` → `setSetting('muted', !muted)`.
+- **§10.5:** the desk, page and book block are core (`track.objects.ground`); scenery only dresses them.
+- **§10.8:**
+  - main plays `select {characterId}` when the menu screen becomes 'character' and `title` on every other title/menu screen, only when the shot changes; while a shot runs, cinematics reacts to `menu` events itself.
+  - main also plays intro, finish and podium, and stops the running shot before setup, teardown and quit.
+  - `skipCinematic` stops the running shot.
+- **§12:**
+  - Core owns hit shake: the rig reacts to `hit` and `wallHit` of the kart it follows; others call `cameraRig.shake(amount)` only for extra jolts.
+  - The shadow frustum is a 40 m half-size centred 16 m ahead along the view.
+- **§14:** `race.timeToGo` comes from integer `race.stepsToGo`.
+- **§17:**
+  - `events()` records only under automation (`navigator.webdriver`) or when `__kk.logEvents = true`.
+  - `leaks()` returns `{ leaks, last }`.
+  - `memory()` renders once before reading.
+
+### 19.1 Public APIs as built (beyond the sections above)
+
+- **`ui/lettering.js` (stub):**
+  - `drawLettering(ctx, text, {x, y, size, colors:{fill, shadow, ink}, seed, align}) → {width, height}`, with y as the baseline.
+  - `letteringElement(text, {size, colors}) → <span>`.
+  - The staged real version also has `measureLettering`, `letteringTexture` and `clearLetteringCache`.
+- **`track/trackQuery.js`:**
+  - Exports `EDGE_CODES`, `EDGE_NAMES`, `SURF_CODES`, `SURF_NAMES`, `createQueryInfo`.
+  - `track.pointAt(t, lateral, out)`.
+  - Extra sample arrays: `hx`, `hz`, `bank`, `slopeRight`, `heading`, `curvature`, `padId`, `rampId`.
+  - `track.ramps[{index, def, t, d0, d1, length, height, trick, popup}]` and `track.pads[{index, t, lateral, d0, d1, halfWidth}]`.
+  - `startIndex`, `startDist`, `startT`, `pageY`, `group`, `analysis`.
+  - Extra objects: `offroad`, `skirts`, `water`, `void`.
+- **Materials:**
+  - `paper()` also takes `overlay`, `overlayColor`, `overlayRepeat`, `scroll`, `vertexColors`, `transparent`, `opacity`, `depthWrite`, `grain` and `screen {size, dot, amount}`.
+  - `emissive(color, {transparent, opacity, fog})`.
+  - Textures: `grain`, `dots`, `roadLines`, `checker`, `stripes`, `chevrons`, `hatch`, `grid`, `waves`, `fence`.
+  - Also `uniforms`, `gradientMap`, `setInk`, `setDotPx`, `update(time)`, `warm()`, `all()`.
+- **Renderer:** `game.renderer` is the THREE.WebGLRenderer itself, plus:
+  - `scene`, `camera`, `sun`, `ambient`, `sky`, `sunTarget` (the frustum leads it along the view);
+  - `setTheme(t|null)`, `setQuality`, `resize`, `updateWorld(cam)`;
+  - `theme`, `quality`, `shadowCalls`, `cssWidth`/`cssHeight`;
+  - `info.autoReset = false` (core resets once per frame).
+- **Camera rig:** `target`, `override {update(frameDt, camera)}`, `debugMode`, `lookBack`, `shake(amount)`, `snap()`, `setHorizontalFov(deg)`, `yaw`, `hfov`, `dispose()`.
+- **Input:**
+  - `nav {up, down, left, right, confirm, back, pause}`; `pause` is already used up by core when it opens the pause; Space is both drift and confirm.
+  - `pad {connected, id, axes, held, pressed, values}`, `touch`, `device`.
+  - `keyHeld(code)`, `keyPressed(code)`, `anyPressed(name)`, `testControls`, `endFrame()`; `PAD` is exported.
+- **Kart:**
+  - Fields: `baseTop`, `topSpeed`, `rubberBand` (AI writes it), `mass`, `steerIn`, `visualYaw`, `pinned`, `hop`, `trick`, `wallContact`, `wrongWay`, `lastHitBy`, `estimated`, `crossLap`.
+  - Methods: `placeAt(pos, heading)`, `teleport(t, lateral)`, `cancelDrift()`, `applyBoost(d, s, src, extra)`.
+  - `wallHit` also carries `kept` and `angle`.
+- **Race:** `timeToGo`, `stepsToGo`, `placeChanges`, `trackLength`, `update`, `finishNow`; `sortStandings(gp)` is exported.
+- **Config (new keys):**
+  - `kart.wallImpactSpeed`, `kart.wallImpactCooldown`, `kart.wallAlign`
+  - `camera.shakeHit`, `camera.shakeWall`
+  - `render.shadowLead`, `render.outlinePx`
+- **game:** `loop` (with `timeScale`), `autoPause`, `debug {leaks, lastLeakCheck}`, `qualityAuto`, `window.__kkGame`.
+- **`__kk` extras:**
+  - `logEvents` (get/set), `events(sinceSeq)`, `eventSeq()`, `setControls`, `setAutoPause`, `memory()`, `leaks()`, `layoutWarnings()`.
+  - Richer `state()`, `perf()` and `stats()`.
+  - `startGP({autopilot})`.

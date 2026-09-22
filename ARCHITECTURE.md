@@ -35,8 +35,7 @@ pads, offroad, respawn by a paper crane, podium ceremony.
 
 - `index.html` is a page **body**: no `<!doctype>`, `<html>`, `<head>`, `<body>`.
   Order inside it: `<title>` first (the host scans only the first 8 KB), the import
-  map, the Google Fonts `<link>`, `<style>`, then `<script type="module"
-  src="./src/main.js">`.
+  map, `<style>`, then `<script type="module" src="./src/main.js">`.
 - The host wraps it in `<!doctype html><html><head><meta charset="utf-8"><meta
   name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">`
   **plus a CSS reset**: light `color-scheme`; `:root` padded top/bottom by the
@@ -53,9 +52,13 @@ pads, offroad, respawn by a paper crane, podium ceremony.
   `three/tsl`. Before using an addon open it and confirm every import is `'three'`
   or relative (known bad: `objects/SkyMesh.js`, anything under `jsm/tsl/`).
   `utils/BufferGeometryUtils.js` is fine.
-- Stylesheets: only `fonts.googleapis.com` (latin-ext subsets). Everything else —
-  images, audio, fetches to other hosts — is blocked silently. All assets are
-  generated in code. Own module CSS is injected from JS as a `<style>` element.
+- **No external assets of any kind — owner's rule (22 Sep 2026): "dışarıdan asset
+  kullanma, tamamen kodla üret her şeyi".** No model, texture, image, sound, music
+  or font files from anywhere: not from the network, not from disk, not from AI
+  generators (Meshy, Higgsfield, image_gen). No web fonts (no Google Fonts link).
+  Every asset is generated in code at runtime: geometry, CanvasTextures, WebAudio,
+  and lettering (§13). three.js is a library, not an asset. Own module CSS is
+  injected from JS as a `<style>` element.
 - No `alert/confirm/prompt`, `window.open`, downloads, print, `THREE.Clock`
   (deprecated in r186; time comes from `loop.js` / `performance.now()`).
 - `document.documentElement.lang = 'tr'` is set by main.js before any UI.
@@ -97,7 +100,7 @@ factory in §10, so the game runs end to end before any agent starts. An agent
 replaces its folder but keeps the exports and their contracts.
 
 Cross-folder imports: only the entry exports named in §10 (`characters/characters.js`
-`ROSTER`/`createKartVisual`, `track/defs/index.js` `TRACKS`/`CUP`) and core's
+`ROSTER`/`createKartVisual`, `track/defs/index.js` `TRACKS`/`CUP`, `ui/lettering.js`) and core's
 public modules (`core/*`, `render/materials.js`, `track/trackQuery.js`). Never
 import another agent's internal files.
 
@@ -580,12 +583,24 @@ showFps: false, seenTutorial: false }`. Changed only through `api.setSetting`.
 query. `game.touch` (bool) is resolved by core from the setting, `(pointer:
 coarse)` and the first `pointerdown` with `pointerType === 'touch'`.
 
-Fonts: `config.fonts = { display: { family, weight }, body: { family, weight } }`
-is the only place faces are named; `index.html` links exactly those (latin-ext).
-`game.fontsReady` = `document.fonts.load` for both faces with the sample
-`'ÇĞIİÖŞÜçğıiöşüÂâ'`, with a 3 s timeout that resolves anyway. Canvas text
-awaits it. The UI agent may change the two faces in `config.fonts` **and** the
-matching `<link>` in `index.html` — the one exception to file ownership.
+Lettering (owner's choice, 22 Sep 2026: display type drawn in code, body text in
+the system font):
+- **Body text** uses the system stack `config.fonts.body =
+  'system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'` (all cover
+  Turkish). Nothing is downloaded; `game.fontsReady` is an already-resolved Promise
+  kept for compatibility.
+- **Display lettering** — the logo, place numbers, lap/countdown numerals, banners
+  ("SON TUR", "BİTİŞ"), menu headings, chapter titles on signs — is drawn
+  procedurally as **cut-paper letters**: each glyph built from vector strokes/
+  polygons, cut with slightly irregular edges, a paper fill, a hard offset shadow,
+  per-letter deterministic tilt and a small colour-plate offset. The UI agent owns
+  it in `src/ui/lettering.js` and it must cover A–Z plus Ç Ğ İ I Ö Ş Ü Â, digits,
+  `. : / ! ? - '` and lowercase-to-uppercase via `toLocaleUpperCase('tr')`. API:
+  `drawLettering(ctx2d, text, { x, y, size, colors, seed, align })` for canvases
+  and `letteringElement(text, opts) → HTMLElement` (inline SVG) for the DOM. Other
+  modules that paint text into CanvasTextures (scenery signs, cinematics captions)
+  import `ui/lettering.js` — the one allowed cross-folder import from `src/ui/`.
+  Until it exists, they fall back to `config.fonts.body` bold.
 
 ## 14. Race rules (`src/race/`, core)
 
@@ -669,7 +684,7 @@ releases per lap per CPU; ≥ 15 place changes; ≥ 4 item uses per CPU; autopil
 `newContext({ hasTouch: true, isMobile: true, viewport: { width: 844, height: 390 } })`.
 
 **Rules for every agent**
-- Touch only files your task owns (§3; the one exception is §13 fonts). Need a
+- Touch only files your task owns (§3). Need a
   core change? Don't make it — list it under `CORE_REQUESTS` with the exact API.
 - **Verify in the real browser**: run the page, run a scenario (your own in
   `tools/scenarios/<agent>.mjs` is welcome), take screenshots and **open them and

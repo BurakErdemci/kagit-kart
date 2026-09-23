@@ -1,6 +1,7 @@
 // LOOK lane: chase/top/side/overview screenshots of every track's surfaces, plus budget and leak numbers.
 // node tools/scenarios/look.mjs [--port 8780] [--quality high|medium|low] [--tracks meadow,desk]
 //                               [--views start,straight,...] [--tag cur] [--cpus 2] [--width 1280 --height 720]
+//                               [--hud 0] (hide the DOM HUD so the ground is not covered)
 // Shots land in tools/out/look/<tag>/<track>-<view>-<quality>.png. The world is frozen (timeScale 0)
 // while a shot settles, so before/after pairs frame the same moment.
 import { spawn } from 'node:child_process';
@@ -43,6 +44,7 @@ try {
   page.on('pageerror', (e) => report.errors.push('pageerror: ' + e.message));
   await page.goto(`http://127.0.0.1:${port}/`);
   await page.waitForFunction(() => window.__kk && window.__kk.ready, null, { timeout: 30000 });
+  if (arg('--hud', '1') === '0') await page.addStyleTag({ content: '#kk-root > :not(canvas) { visibility: hidden !important; }' });
   const trackIds = (arg('--tracks', '') || '').split(',').filter(Boolean);
   const ids = trackIds.length ? trackIds : await page.evaluate(async () => (await import('/src/track/defs/index.js')).CUP.slice());
 

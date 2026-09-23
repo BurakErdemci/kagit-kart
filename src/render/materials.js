@@ -126,6 +126,15 @@ const HALFTONE = /* glsl */`
 #endif
 `;
 
+// Received shadows: one hardware-filtered (bilinear PCF) tap per fragment, cut at half coverage. The cut
+// follows the smooth bilinear contour, so the edge stays hard like a printed offset shadow but runs
+// straight across shadow-map texels instead of stair-stepping (the renderer sets PCFShadowMap, radius 0).
+const SHADOW_TAPS = /shadow = \(\s*texture\( shadowMap, vec3\( shadowCoord\.xy \+ vogelDiskSample\( 0, 5, phi \) \* radius, shadowCoord\.z \) \)[\s\S]*?\) \* 0\.2;/;
+const SHADOW_PARS = SHADOW_TAPS.test(THREE.ShaderChunk.shadowmap_pars_fragment)
+  ? THREE.ShaderChunk.shadowmap_pars_fragment.replace(SHADOW_TAPS,
+    'shadow = smoothstep( 0.4, 0.6, texture( shadowMap, vec3( shadowCoord.xy, shadowCoord.z ) ) );')
+  : THREE.ShaderChunk.shadowmap_pars_fragment;
+
 function hexOf(c) {
   if (c == null) return 'none';
   if (c instanceof THREE.Color) return c.getHexString();
@@ -220,7 +229,7 @@ export function createMaterials(renderer, cfg) {
       if (overlay || plates) vs = 'varying vec2 vPaperUv;\n' + vs.replace('#include <uv_vertex>', '#include <uv_vertex>\n\tvPaperUv = uv;');
       shader.vertexShader = vs;
       shader.fragmentShader = shader.fragmentShader
-        .replace('#include <shadowmap_pars_fragment>', '#include <shadowmap_pars_fragment>\n' + PARS)
+        .replace('#include <shadowmap_pars_fragment>', SHADOW_PARS + '\n' + PARS)
         .replace('#include <map_fragment>', OVERLAY)
         .replace('#include <color_fragment>', PLATES)
         .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += kkGlow;')
@@ -232,42 +241,48 @@ export function createMaterials(renderer, cfg) {
     return m;
   }
 
-  function paper(color, opts = {}) {
+  // Every option make() reads, so two calls share a cached material only when they would build the same one.
+  function optsKey(opts) {
     const {
-      halftone = true, map = null, side = THREE.FrontSide, flat = true, unique = false,
+      halftone = true, map = null, side = THREE.FrontSide, flat = true,
       overlay = null, overlayColor = null, overlayRepeat = null, scroll = 0,
       vertexColors = false, transparent = false, opacity = 1, depthWrite = true,
-      screen = null, // { size: m, dot: 0..0.5 cells, amount: 0..1 } world-space print screen
-      grain = 1, // paper fibre strength
-      plates = null, // { map: RGB mask texture, colors: [r, g, b] } — null colour skips that plate
+      screen = null, grain = 1, plates = null,
     } = opts;
-    const key = [
-      hexOf(color), halftone ? 1 : 0, map ? map.uuid : '-', side, flat ? 1 : 0,
+    return [
+      halftone ? 1 : 0, map ? map.uuid : '-', side, flat ? 1 : 0,
       overlay ? overlay.uuid : '-', hexOf(overlayColor), overlayRepeat ? overlayRepeat.join('x') : '-', scroll,
       vertexColors ? 1 : 0, transparent ? 1 : 0, opacity, depthWrite ? 1 : 0,
       screen ? `${screen.size}/${screen.dot}/${screen.amount}` : '-', grain,
       plates ? `${plates.map.uuid}/${keyOf(plates.colors)}` : '-',
     ].join('|');
-    if (!unique && cache.has(key)) return cache.get(key);
-    return make(color, opts, key, unique);
   }
 
-  // Printed track surfaces. params: c0..c3 colours, v0/v1 number[4], tex0/tex1 textures (defaults below);
+  // opts: halftone, map, side, flat, unique, overlay, overlayColor, overlayRepeat, scroll, vertexColors,
+  // transparent, opacity, depthWrite, grain (paper fibre strength),
+  // screen { size: m, dot: 0..0.5 cells, amount: 0..1 } (world-space print screen),
+  // plates { map: RGB mask texture, colors: [r, g, b] } (a null colour skips that plate)
+  function paper(color, opts = {}) {
+    const key = hexOf(color) + '|' + optsKey(opts);
+    if (!opts.unique && cache.has(key)) return cache.get(key);
+    return make(color, opts, key, !!opts.unique);
+  }
+
+  // Printed track surfaces. params: c0..c5 colours, v0..v2 number[4], tex0/tex1 textures (defaults below);
   // opts: any paper() option (side, grain, unique, transparent...). Geometry supplies aKkA / aKkB.
-  const KIND_TEX = { band: ['hatch', null], page: ['hatch', null], hole: ['wood', 'stack'] };
+  const KIND_TEX = { road: ['fibre', null], band: ['hatch', null], page: ['hatch', null], hole: ['wood', 'stack'] };
   function surface(kind, params = {}, opts = {}) {
     if (!KINDS[kind]) throw new Error(`unknown surface kind '${kind}'`);
     const [t0, t1] = KIND_TEX[kind] || [null, null];
     const p = { tex0: t0 ? textures[t0] : null, tex1: t1 ? textures[t1] : null, ...params };
-    const key = ['surf', kind, keyOf(p.c0), keyOf(p.c1), keyOf(p.c2), keyOf(p.c3), keyOf(p.v0), keyOf(p.v1),
-      keyOf(p.tex0), keyOf(p.tex1), opts.side ?? THREE.FrontSide, opts.grain ?? 1, opts.halftone === false ? 0 : 1,
-      opts.transparent ? 1 : 0, opts.depthWrite === false ? 0 : 1].join('|');
+    const key = ['surf', kind, keyOf(p.c0), keyOf(p.c1), keyOf(p.c2), keyOf(p.c3), keyOf(p.c4), keyOf(p.c5),
+      keyOf(p.v0), keyOf(p.v1), keyOf(p.v2), keyOf(p.tex0), keyOf(p.tex1), optsKey(opts)].join('|');
     if (!opts.unique && cache.has(key)) return cache.get(key);
     const col = (c) => ({ value: new THREE.Color(c ?? 0x000000) });
     const vec = (v) => ({ value: new THREE.Vector4(...(v || [0, 0, 0, 0])) });
     const kindUniforms = {
-      uKkC0: col(p.c0), uKkC1: col(p.c1), uKkC2: col(p.c2), uKkC3: col(p.c3),
-      uKkV0: vec(p.v0), uKkV1: vec(p.v1),
+      uKkC0: col(p.c0), uKkC1: col(p.c1), uKkC2: col(p.c2), uKkC3: col(p.c3), uKkC4: col(p.c4), uKkC5: col(p.c5),
+      uKkV0: vec(p.v0), uKkV1: vec(p.v1), uKkV2: vec(p.v2),
       uKkTex0: { value: p.tex0 || textures.grain }, uKkTex1: { value: p.tex1 || textures.grain },
     };
     const m = make('#ffffff', opts, key, !!opts.unique, kind, kindUniforms);

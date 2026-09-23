@@ -205,6 +205,33 @@ export function createTextures(renderer) {
     g.globalAlpha = 1;
   });
 
+  // Paper fibres for washed surfaces: R = fibres that took up more ink (darker), G = fibres that stayed
+  // light. Long, thin, gently curved hairs at random angles; tiles seamlessly (drawn wrapped).
+  const fibreC = canvas(512, 512);
+  {
+    const g = fibreC.getContext('2d');
+    g.fillStyle = '#000';
+    g.fillRect(0, 0, 512, 512);
+    g.globalCompositeOperation = 'lighter';
+    g.lineCap = 'round';
+    for (let k = 0; k < 260; k++) {
+      const x = rand() * 512, y = rand() * 512, a = rand() * Math.PI, l = 24 + rand() * 80;
+      const bend = (rand() - 0.5) * l * 0.35;
+      const v = Math.round(90 + rand() * 165);
+      g.strokeStyle = rand() < 0.62 ? `rgb(${v},0,0)` : `rgb(0,${v},0)`;
+      g.lineWidth = 0.8 + rand() * 1.4;
+      const dx = Math.cos(a) * l, dy = Math.sin(a) * l, nx = -Math.sin(a) * bend, ny = Math.cos(a) * bend;
+      for (const ox of [-512, 0, 512]) for (const oy of [-512, 0, 512]) {
+        if (x + ox < -l || x + ox > 512 + l || y + oy < -l || y + oy > 512 + l) continue;
+        g.beginPath();
+        g.moveTo(x + ox, y + oy);
+        g.quadraticCurveTo(x + ox + dx / 2 + nx, y + oy + dy / 2 + ny, x + ox + dx, y + oy + dy);
+        g.stroke();
+      }
+    }
+    g.globalCompositeOperation = 'source-over';
+  }
+
   // Ramp sticker plates (clamped; the 1 px border stays empty so off-sticker UVs print nothing):
   // R = chevrons, G = die-cut sticker paper, B = its hard offset shadow. u = across, v = up the ramp.
   const rampC = canvas(256, 256);
@@ -251,6 +278,7 @@ export function createTextures(renderer) {
     stack: tex(stackC, { aniso }),
     rail: tex(railC, { aniso }),
     wood: tex(woodC, { aniso }),
+    fibre: tex(fibreC, { aniso }),
     rampSticker: tex(rampC, { aniso, repeat: false }),
   };
   return textures;

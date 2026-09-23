@@ -48,7 +48,9 @@ export function createRenderer(game, container) {
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.NoToneMapping;
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.BasicShadowMap;
+  // Hard shadows all the same: paper materials cut this filtered lookup at 50 % (materials.js SHADOW_PARS),
+  // which keeps a printed hard edge without BasicShadowMap's texel stair-steps.
+  renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.info.autoReset = false;
   renderer.setClearColor(0xf3ead3, 1);
 
@@ -77,6 +79,7 @@ export function createRenderer(game, container) {
   Object.assign(sun.shadow.camera, { left: -ext, right: ext, top: ext, bottom: -ext, near: 1, far: config.render.shadowDistance * 2 });
   sun.shadow.bias = -0.0006;
   sun.shadow.normalBias = 0.04;
+  sun.shadow.radius = 0;
   sun.shadow.mapSize.set(2048, 2048);
   scene.add(sun, sun.target);
 
@@ -147,6 +150,44 @@ export function createRenderer(game, container) {
     sun.updateMatrixWorld();
   }
 
+  // Shadow-pass programs compile the first time a caster is drawn in the sun's frustum, which follows the
+  // player, so a caster down the track, or one that is hidden until it pops up, would compile mid-race.
+  // Race setup (after compileAsync) calls this once: every caster is shown for one draw with the frustum
+  // over the whole box, then everything is put back. `draw` must render offscreen.
+  // three.js shares one depth material and re-picks its program only when instancing or skinning
+  // changes between draws, so the variant (side, uv) a caster needs compiles whenever the draw order
+  // first puts it after such a switch. Bumping the material before every warm draw compiles them all.
+  const bumpDepth = (r, o, cam, sc, geo, depthMaterial) => { depthMaterial.needsUpdate = true; };
+  function warmShadows(box, draw) {
+    if (!renderer.shadowMap.enabled || !sun.castShadow) return;
+    const shown = [], counts = [], hooked = [];
+    scene.traverse((o) => {
+      if (!o.castShadow || !(o.isMesh || o.isLine || o.isPoints)) return;
+      if (o.isInstancedMesh && o.count === 0) { counts.push(o); o.count = 1; }
+      for (let p = o; p; p = p.parent) if (!p.visible) { p.visible = true; shown.push(p); }
+      if (!Object.prototype.hasOwnProperty.call(o, 'onBeforeShadow')) { o.onBeforeShadow = bumpDepth; hooked.push(o); }
+    });
+    const sc = sun.shadow.camera;
+    const saved = [sc.left, sc.right, sc.top, sc.bottom, sc.near, sc.far];
+    const c = box.getCenter(tmp);
+    const r = box.getSize(lead).length() / 2 + 10;
+    Object.assign(sc, { left: -r, right: r, top: r, bottom: -r, near: 1, far: 4 * r });
+    sc.updateProjectionMatrix();
+    sun.target.position.copy(c);
+    sun.position.copy(c).addScaledVector(sunDir, 2 * r);
+    sun.target.updateMatrixWorld();
+    sun.updateMatrixWorld();
+    try {
+      draw();
+    } finally {
+      [sc.left, sc.right, sc.top, sc.bottom, sc.near, sc.far] = saved;
+      sc.updateProjectionMatrix();
+      for (const o of shown) o.visible = false;
+      for (const o of counts) o.count = 0;
+      for (const o of hooked) delete o.onBeforeShadow;
+    }
+  }
+
   let quality = 'high';
   function setQuality(level) {
     const prevShadows = renderer.shadowMap.enabled;
@@ -185,7 +226,7 @@ export function createRenderer(game, container) {
   }
 
   Object.assign(renderer, {
-    scene, camera, sun, ambient, sky, sunTarget, setTheme, setQuality, resize, updateWorld,
+    scene, camera, sun, ambient, sky, sunTarget, setTheme, setQuality, resize, updateWorld, warmShadows,
     theme: BOOK_THEME, quality,
   });
   setTheme(BOOK_THEME);

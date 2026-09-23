@@ -8,6 +8,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { analyzeLayout, buildGrid, EDGE_CODES, SURF_CODES, sampleTrack, wrapIndex } from './trackSampler.js';
 import { attachQueries } from './trackQuery.js';
 import { buildPagePrint } from '../render/pagePrint.js';
+import { roadPrint } from '../render/roadInk.js';
 
 class GeoBuilder {
   // attrs: extra per-vertex attributes { name: itemSize } that fn fills as out[name][0..size-1]
@@ -89,6 +90,7 @@ export function buildTrack(game, def) {
   const N = data.sampleCount;
   const L = data.length;
   const pageY = data.minY - 0.05;
+  const deskY = pageY - cfg.deskDrop;
 
   const group = new THREE.Group();
   group.name = `track:${def.id}`;
@@ -96,7 +98,8 @@ export function buildTrack(game, def) {
   const track = {
     def, length: L, sampleCount: N, spacing: data.spacing, samples: s,
     checkpoints: cfg.checkpoints.slice(),
-    killY: data.minY - cfg.killDepth,
+    // A kart that falls through a void respawns as it reaches the desk, never below it.
+    killY: deskY + 0.3,
     bounds: new THREE.Box3(
       new THREE.Vector3(data.bounds2d.minX, data.minY - 1, data.bounds2d.minZ),
       new THREE.Vector3(data.bounds2d.maxX, data.maxY + 6, data.bounds2d.maxZ),
@@ -127,7 +130,6 @@ export function buildTrack(game, def) {
     o.y = (s.py[a] + s.ry[a] * lat) * (1 - t) + (s.py[b] + s.ry[b] * lat) * t;
     o.z = (s.pz[a] + s.rz[a] * lat) * (1 - t) + (s.pz[b] + s.rz[b] * lat) * t;
   };
-  const deskY = pageY - cfg.deskDrop;
   const extraDispose = [];
 
   const add = (geo, mat, name, { receive = true, cast = false } = {}) => {
@@ -178,9 +180,10 @@ export function buildTrack(game, def) {
       set4(o.aKkB, dip[i], code === SURF_CODES.ice ? 1 : 0, code === SURF_CODES.sand ? 1 : 0, 0);
     });
   }
+  const ink = roadPrint(def);
   const roadMat = mats.surface('road', {
-    c0: theme.road, c1: theme.roadLine, c2: mix(theme.road, '#eef6ff', 0.72), c3: mix(theme.road, '#e3c48c', 0.7),
-    v0: [L / dashCount, 0, 0, gutterW], v1: gutterLine,
+    c0: ink.wash, c1: ink.line, c2: mix(ink.wash, '#eef6ff', 0.72), c3: mix(ink.wash, '#e3c48c', 0.7), c4: ink.rule, c5: ink.margin,
+    v0: [L / dashCount, ink.style, ink.ruleSpacing, gutterW], v1: gutterLine,
   }, { grain: 1.6 });
   track.objects.road = add(roadB.build(), roadMat, 'road');
 
@@ -260,7 +263,7 @@ export function buildTrack(game, def) {
   }
   if (!curbB.empty) {
     const curbMat = mats.paper('#ffffff', { vertexColors: true });
-    track.objects.curbs = add(curbB.build(), curbMat, 'curbs', { cast: true });
+    track.objects.curbs = add(curbB.build(), curbMat, 'curbs');
   }
 
   // --- walls: folded card fences, pleated like an accordion; alternate panels face the light or not --
@@ -296,9 +299,7 @@ export function buildTrack(game, def) {
 
   // --- water: a printed sheet plus rows of cut-paper waves sliding along the shore ------------------
   // def.waterLevel (absolute y) puts every water edge at one surface, e.g. under a high bridge.
-  const waterY = (i, side) => (def.waterLevel != null
-    ? Math.max(pageY + 0.05, def.waterLevel + 0.04)
-    : Math.max(pageY + 0.05, edgeY(i, side) - cfg.waterDrop));
+  const waterY = (i, side) => track.waterSurface(edgeY(i, side));
   const waterB = new GeoBuilder();
   const waveB = new GeoBuilder({ aKkA: 4, aKkB: 4 });
   const voidB = new GeoBuilder({ aKkA: 4, aKkB: 4 });
@@ -357,8 +358,9 @@ export function buildTrack(game, def) {
     const voidMat = mats.surface('hole', {
       c0: theme.desk, c1: mix(theme.desk, theme.ink, 0.45), c2: SHEET, c3: mix(SHEET, theme.ink, 0.35),
       v0: [deskY, 0, 0, 0], v1: [sun.x, sun.y, sun.z, 0],
-    }, { side: THREE.DoubleSide });
-    track.objects.void = add(voidB.build(), voidMat, 'void');
+    }, { side: THREE.DoubleSide, halftone: false });
+    // its shading is the trench it ray-casts, so shadow at the strip's page-level position would lie
+    track.objects.void = add(voidB.build(), voidMat, 'void', { receive: false });
     track.objects.void.renderOrder = -1;
   }
 
@@ -401,7 +403,7 @@ export function buildTrack(game, def) {
   if (!padB.empty) {
     const gold = mix(theme.accents?.[0] || '#f2c14e', '#fff3c8', 0.2);
     const padMat = mats.surface('foil', {
-      c0: gold, c1: mix(theme.curbA, theme.ink, 0.25), c2: mix(SHEET, '#ffffff', 0.5), c3: mix(theme.road, theme.ink, 0.45),
+      c0: gold, c1: mix(theme.curbA, theme.ink, 0.25), c2: mix(SHEET, '#ffffff', 0.5), c3: mix(ink.wash, theme.ink, 0.45),
       v0: [0.9, 0, 0, 0],
     });
     track.objects.boostPads = add(padB.build(), padMat, 'boostPads');
@@ -420,6 +422,7 @@ export function buildTrack(game, def) {
   const rampCols = {
     plate: new THREE.Color(accent), edge: new THREE.Color(SHEET),
     side: mix(accent, theme.ink, 0.22), lip: mix(accent, theme.ink, 0.34),
+    crease: mix(accent, theme.ink, 0.72), fold: mix(accent, '#ffffff', 0.5), tab: mix(accent, theme.ink, 0.1),
   };
   for (const r of data.ramps) {
     const { mesh, setUnfold } = buildRamp(s, data, r, idx, rampMat, rampCols);
@@ -571,6 +574,20 @@ function buildRamp(s, data, r, idx, mat, cols) {
   };
   const hwAt = (row) => s.halfWidth[idx(i0 + row)] * 0.98;
   const off = (o) => { o.u = -1; o.v = -1; }; // outside the clamped sticker: prints nothing
+  // fractional rows (metres / spacing) for the fold details, following the plate's profile
+  const hgtF = (f) => r.height * Math.min(1, Math.max(0, f * sp) / r.length);
+  const pa = { x: 0, y: 0, z: 0 }, pb = { x: 0, y: 0, z: 0 };
+  const atF = (f, lat, lift, o) => {
+    const f0 = Math.floor(f), t = f - f0;
+    at(f0, lat, hgtF(f) + lift, pa);
+    at(f0 + 1, lat, hgtF(f) + lift, pb);
+    o.x = pa.x + (pb.x - pa.x) * t; o.y = pa.y + (pb.y - pa.y) * t; o.z = pa.z + (pb.z - pa.z) * t;
+  };
+  const band = (fa, fb, lift, col) => b.strip(2, 2, (row, c, o) => {
+    const f = row === 0 ? fa : fb;
+    atF(f, (c === 0 ? -1 : 1) * hwAt(Math.round(f)), lift, o);
+    off(o); setCol(o.color, col);
+  });
   // top plate (sticker UVs: u across, v up the ramp)
   b.strip(rows, 2, (row, c, o) => {
     at(row, (c === 0 ? -1 : 1) * hwAt(row), hgt(row), o);
@@ -591,6 +608,12 @@ function buildRamp(s, data, r, idx, mat, cols) {
       off(o); setCol(o.color, cols.side);
     });
   }
+  // a folded card, not a wedge: the glued tab lies flat before the hinge, ink creases mark the hinge and
+  // the fold over the lip, and the ridge of that fold catches the light
+  band(-0.8 / sp, 0, 0, cols.tab);
+  band(-0.06 / sp, 0.08 / sp, 0.012, cols.crease);
+  band(rows - 1 - 0.45 / sp, rows - 1 - 0.1 / sp, 0.01, cols.fold);
+  band(rows - 1 - 0.1 / sp, rows - 1, 0.012, cols.crease);
   // lip face, then the card's edge along its top
   const top = hgt(rows - 1);
   for (const [y0, y1, col] of [[0, top - T, cols.lip], [top - T, top, cols.edge]]) {

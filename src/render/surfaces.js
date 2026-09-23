@@ -46,6 +46,17 @@ float kkScreenRough( vec2 p, float cell, float tone ) {
   // settles to flat tone a little earlier than kkScreen: the road scrolls fast under the camera
   return mix( m, tone, smoothstep( 0.14, 0.32, length( fwidth( sp ) ) ) );
 }
+// An engraver's line screen across x (metres): lines every period covering tone of the width;
+// below ~4 px between lines it settles to the flat tone. Read along the lines it never forms the
+// ellipses a dot screen does at grazing angles.
+float kkLines( float x, float period, float tone ) {
+  float q = x / period;
+  float f = abs( fract( q ) - 0.5 ) * 2.0;
+  float w = max( fwidth( q ), 1e-4 ) * 2.0;
+  float tt = tone * ( 1.0 + 2.0 * w );
+  float m = 1.0 - smoothstep( tt - w, tt + w, f );
+  return mix( m, tone, smoothstep( 0.18, 0.4, fwidth( q ) ) );
+}
 float kkBox( vec2 p, vec2 b, float r ) {
   vec2 q = abs( p ) - b + r;
   return length( max( q, 0.0 ) ) + min( max( q.x, q.y ), 0.0 ) - r;
@@ -59,8 +70,11 @@ export const KIND_PARS = /* glsl */`
   uniform vec3 uKkC1;
   uniform vec3 uKkC2;
   uniform vec3 uKkC3;
+  uniform vec3 uKkC4;
+  uniform vec3 uKkC5;
   uniform vec4 uKkV0;
   uniform vec4 uKkV1;
+  uniform vec4 uKkV2;
   uniform sampler2D uKkTex0;
   uniform sampler2D uKkTex1;
   varying vec4 vKkA;
@@ -115,9 +129,11 @@ export const KIND_VERTEX = /* glsl */`
 #endif
 `;
 
-// Road: an ink wash on paper. aKkA = (lateral m, distance m, halfWidth m, curvature -1..1),
-// aKkB = (dip 0..1, ice 0/1, sand 0/1, -). C0 wash, C1 reserved-paper lines, C2 ice, C3 sand; V0.x dash period;
-// V0.w / V1 the page's gutter (see PAGE_PRINT).
+// Road: a strip of the page printed in one ink wash (or, style 1, a strip of ruled notebook paper).
+// aKkA = (lateral m, distance m, halfWidth m, curvature -1..1), aKkB = (dip 0..1, ice 0/1, sand 0/1, -).
+// C0 wash / sheet, C1 line colour (reserved paper; notebook: pen), C2 ice, C3 sand, C4 notebook rules,
+// C5 notebook margin; V0 = (dash period m, style, rule spacing m, gutter width), V1 the page's gutter
+// (see PAGE_PRINT).
 const ROAD = /* glsl */`
 #ifdef KK_ROAD
 {
@@ -125,18 +141,38 @@ const ROAD = /* glsl */`
   float side = lat < 0.0 ? -1.0 : 1.0;
   float e = hw - abs( lat );
   vec2 wp = vPaperWorld.xz;
-  // An ink wash printed on the page: a first flat layer and a second glaze pooled in crisp-edged blotches
-  // with a darker dried rim, brush drag along the strip; over it the printer's dot screen, about a quarter
-  // coverage, whose dots grow where the road sags (vKkB.x) or falls into the gutter.
-  float n1 = kkNoise( wp * 0.06 ), n2 = kkNoise( wp * 0.23 + 3.7 );
-  float gv = n1 + 0.12 * n2;
-  vec3 col = uKkC0 * ( 1.08 + 0.06 * ( n2 - 0.5 ) );
-  col = mix( col, uKkC0 * vec3( 0.88, 0.91, 0.97 ), kkBand( gv, 0.5, 9.0 ) * 0.9 );
-  col = mix( col, uKkC0 * 0.76, kkBand( gv, 0.5, 0.515 ) * 0.5 );
-  col *= 1.0 - 0.1 * ( 1.0 - smoothstep( 0.2, 1.4, e ) );
-  col *= 0.94 + 0.12 * texture2D( uGrainTex, vec2( lat * 0.23, dist * 0.02 ) ).r;
-  float tone = 0.24 + 0.1 * ( n2 - 0.5 ) + 0.1 * ( 1.0 - smoothstep( 0.2, 1.4, e ) ) + 0.24 * vKkB.x + 0.22 * kkGutterT( wp );
-  col = mix( col, col * vec3( 0.74, 0.77, 0.86 ), kkScreenRough( wp, 0.24, clamp( tone, 0.04, 0.5 ) ) );
+  bool notebook = uKkV0.y > 0.5;
+  // pen-pressure wobble shared by the edge lines
+  float wob = 0.045 * sin( dist * 0.11 + side * 1.7 ) + 0.025 * sin( dist * 0.47 + side ) + 0.02 * kkNoise( vec2( dist * 0.8, side * 5.0 ) );
+  // One flat layer of wash dragged along the strip by a wide brush (long faint streaks, a slow bloom), a
+  // little deeper where it pooled against the edge. No second glaze: its blotches read as wet asphalt.
+  // Near the camera the paper itself shows through: its fibres (Tex0: R took more ink, G stayed light) and
+  // the cloudy formation of the sheet; both fade out before they could shimmer in the distance.
+  float near = 1.0 - smoothstep( 0.015, 0.06, length( fwidth( wp ) ) );
+  float drag = kkNoise( vec2( lat * 1.1, dist * 0.045 ) ) - 0.5;
+  float bloom = kkNoise( wp * 0.03 + 7.0 ) * 0.5 + kkNoise( wp * 0.21 + 2.0 ) * 0.5 - 0.5;
+  float cloud = ( kkNoise( wp * 1.2 ) - 0.5 ) * near;
+  vec2 fib = texture2D( uKkTex0, wp / 4.5 ).rg;
+  vec3 col = uKkC0 * ( 1.0 + ( notebook ? 0.02 : 0.06 ) * drag + ( notebook ? 0.015 : 0.07 ) * bloom + 0.04 * cloud );
+  // fibres mostly lift the wash (paper showing through); dark ones alone would read as cracks
+  col *= 1.0 - 0.06 * fib.r + ( notebook ? 0.06 : 0.12 ) * fib.g;
+  float edgeT = 1.0 - smoothstep( 0.35, 1.6, e - wob );
+  col *= 1.0 - ( notebook ? 0.03 : 0.07 ) * edgeT;
+  if ( notebook ) {
+    // ruled paper: rules along the strip that stop short of the cut, a red double margin on the left
+    float rl = abs( fract( ( lat + hw ) / uKkV0.z + 0.5 ) - 0.5 ) * uKkV0.z;
+    float rule = ( 1.0 - smoothstep( 0.025, 0.025 + max( fwidth( rl ), 1e-4 ) * 1.5, rl ) ) * smoothstep( 0.5, 0.9, e );
+    col = mix( col, uKkC4, rule * 0.62 );
+    float mx = lat + hw - 2.4;
+    col = mix( col, uKkC5, min( 1.0, kkBand( mx, -0.035, 0.035 ) + kkBand( mx, 0.14, 0.2 ) ) * 0.85 );
+  }
+  // The printer's screen: a flat tint of about 6 % on open road; dots only where the tone rises (dips,
+  // the edge falloff, the gutter), so the open road never shows a regular dot grid.
+  float gut = kkGutterT( wp );
+  float tone = ( notebook ? 0.03 : 0.06 ) + 0.2 * edgeT + 0.3 * vKkB.x + 0.24 * gut;
+  float dotsOn = smoothstep( 0.1, 0.45, max( max( edgeT, vKkB.x * 1.5 ), gut * 1.5 ) );
+  float cov = mix( tone, kkScreenRough( wp, 0.24, clamp( tone, 0.0, 0.5 ) ), dotsOn );
+  col = mix( col, col * vec3( 0.74, 0.77, 0.86 ), cov );
   if ( vKkB.y > 0.01 ) {
     // ice: short printed glint strokes at 45 deg, a few per square metre
     vec2 gp = vec2( wp.x + wp.y, wp.x - wp.y ) * 0.70710678;
@@ -151,7 +187,7 @@ const ROAD = /* glsl */`
     col = mix( col, uKkC3, 0.62 * vKkB.z );
     col *= 1.0 - 0.25 * vKkB.z * kkScreen( wp + kkNoise( wp * 0.7 ) * 0.4, 0.22, 0.14 );
   }
-  // printed tyre scuffs on the racing line through corners
+  // tyre scuffs on the racing line through corners, printed through a fine screen
   float ac = smoothstep( 0.22, 0.8, abs( curv ) );
   if ( ac > 0.001 ) {
     float x = lat + sign( curv ) * 0.36 * hw;
@@ -160,39 +196,53 @@ const ROAD = /* glsl */`
     float t2 = kkBand( abs( abs( x2 ) - 0.66 ), 0.0, 0.09 );
     float brk = smoothstep( 0.28, 0.55, kkNoise( vec2( dist * 0.3, floor( x * 2.0 ) ) ) );
     float dry = 0.4 + 0.6 * texture2D( uGrainTex, vec2( lat * 1.7, dist * 0.017 ) ).r;
-    col = mix( col, uInk, ( t1 + 0.55 * t2 ) * ac * brk * dry * 0.34 );
+    float scuff = ( t1 + 0.55 * t2 ) * ac * brk * dry;
+    col = mix( col, mix( uInk, col, 0.3 ), scuff * 0.62 * kkScreenRough( wp, 0.11, 0.45 ) );
   }
   // centre line: tapered pen strokes, each one a little different
   float k = floor( dist / uKkV0.x ), s = fract( dist / uKkV0.x );
   if ( s < 0.34 ) {
     float q = s / 0.34;
-    float w = 0.17 * pow( sin( 3.14159 * q ), 0.35 ) * ( 0.85 + 0.3 * kkHash( vec2( k, 1.0 ) ) );
+    float w = ( notebook ? 0.1 : 0.17 ) * pow( sin( 3.14159 * q ), 0.35 ) * ( 0.85 + 0.3 * kkHash( vec2( k, 1.0 ) ) );
     float c = 0.12 * ( kkHash( vec2( k, 2.0 ) ) - 0.5 ) + ( q - 0.5 ) * 0.28 * ( kkHash( vec2( k, 3.0 ) ) - 0.5 );
-    float cov = kkBand( lat - c, -w, w ) * smoothstep( 0.1, 0.3, kkNoise( vec2( dist * 2.1, lat * 8.0 ) ) + 0.12 );
-    col = mix( col, uKkC1, cov );
+    float lc = kkBand( lat - c, -w, w ) * smoothstep( 0.1, 0.3, kkNoise( vec2( dist * 2.1, lat * 8.0 ) ) + 0.12 );
+    col = mix( col, uKkC1, lc );
   }
-  // reserved paper edge line, then the hand-inked border with pen-pressure wobble
-  float wob = 0.035 * sin( dist * 0.19 + side * 1.7 ) + 0.022 * sin( dist * 0.73 + side ) + 0.02 * kkNoise( vec2( dist * 0.8, side * 5.0 ) );
-  float el = kkBand( e - wob, 0.5, 0.76 );
-  col = mix( col, uKkC1, el * ( 0.78 + 0.22 * kkNoise( vec2( dist * 3.1, lat ) ) ) );
-  float press = 0.17 + 0.05 * sin( dist * 0.13 + side * 2.0 );
-  col = mix( col, uInk, kkBand( e - wob * 0.8, 0.02, 0.02 + press ) * 0.95 );
+  // edges: the painter's wash stops short of the inked border, leaving a margin of bare paper whose
+  // width wanders (the edge line), with a faint dried rim where the wash ended (notebook: the inked cut
+  // alone). Both sit clear of the strip's edge so the wobble never clips them.
+  if ( !notebook ) {
+    float stop = 0.3 + 0.12 * sin( dist * 0.07 + side * 2.3 ) + 0.1 * ( kkNoise( vec2( dist * 0.21, side * 7.0 ) ) - 0.5 );
+    float bare = 1.0 - kkBand( e - wob, stop, 99.0 );
+    col = mix( col, col * 0.92, kkBand( e - wob, stop, stop + 0.06 ) * 0.8 );
+    col = mix( col, uKkC1, bare * ( 0.82 + 0.18 * kkNoise( vec2( dist * 3.1, lat ) ) ) );
+  }
+  float press = notebook ? 0.06 + 0.015 * sin( dist * 0.13 + side * 2.0 ) : 0.19 + 0.06 * sin( dist * 0.13 + side * 2.0 );
+  col = mix( col, uInk, kkBand( e - wob * 0.8, 0.08, 0.08 + press ) * 0.95 );
+  if ( !notebook ) {
+    // now and then the pen went round twice: a thinner stroke wandering just inside the first
+    float o2 = 0.08 + press + 0.1 + 0.07 * sin( dist * 0.05 + side * 3.1 );
+    float on = smoothstep( 0.5, 0.62, kkNoise( vec2( dist * 0.06, side * 11.0 ) ) );
+    col = mix( col, uInk, kkBand( e - wob, o2, o2 + 0.05 ) * on * 0.7 );
+  }
   diffuseColor.rgb = kkGutterFold( wp, col );
 }
 #endif
 `;
 
-// Offroad band: flat printed colour that breaks into a halftone toward the page.
-// aKkA = (0 at the road edge .. 1 at the band's outer edge, distance m, band width m, -). C0 band, C1 page,
-// C2 hatch; Tex0 hatch mask; V0.w / V1 the page's gutter.
+// Offroad band: flat printed colour that thins out toward the page in engraved lines running with the
+// road. aKkA = (0 at the road edge .. 1 at the band's outer edge, distance m, band width m, -).
+// C0 band, C1 page, C2 hatch; Tex0 hatch mask; V0.w / V1 the page's gutter.
 const BAND = /* glsl */`
 #ifdef KK_BAND
 {
   float t = vKkA.x;
   vec2 wp = vPaperWorld.xz;
-  float tone = 1.0 - smoothstep( 0.45, 1.0, t + ( kkNoise( wp * 0.09 ) - 0.5 ) * 0.16 );
-  tone *= 1.0 - smoothstep( 0.965, 1.0, t );
-  float cov = kkScreen( wp, 1.05, tone );
+  float tone = 1.0 - smoothstep( 0.45, 0.96, t + ( kkNoise( wp * 0.09 ) - 0.5 ) * 0.1 );
+  // across-band metres; each line wanders a little along its length, like a hand-cut plate
+  float x = t * vKkA.z;
+  x += 0.07 * ( kkNoise( vec2( vKkA.y * 0.12, floor( x / 0.55 ) * 3.1 ) ) - 0.5 );
+  float cov = kkLines( x, 0.55, tone );
   vec3 col = mix( kkPagePrint( wp, uKkC1 ), uKkC0, cov );
   float h = texture2D( uKkTex0, wp / 4.6 ).r * ( 1.0 - smoothstep( 0.3, 0.9, t ) );
   col = mix( col, uKkC2, h * 0.55 * cov );

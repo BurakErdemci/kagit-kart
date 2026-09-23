@@ -103,7 +103,8 @@ async function runTrack(page, trackId, args, log) {
     await sleep(250);
   }
   await page.evaluate(() => window.__kk.setTimeScale(1));
-  if (st.phase === 'results') { await sleep(400); await shot('results'); }
+  // results rows animate in (250 ms + 90 ms per row), so wait for all eight before the shot
+  if (st.phase === 'results') { await sleep(1600); await shot('results'); }
 
   const data = await page.evaluate(() => {
     const kk = window.__kk;

@@ -336,11 +336,26 @@ async function startRace(opts = {}) {
 
   // 6.
   try {
-    await game.renderer.compileAsync(game.scene, game.camera);
+    // Programs are keyed by the bound target's colour space: compile for the target the race renders
+    // into (post's linear target on high/medium), or every hidden item/FX program recompiles mid-race.
+    const r = game.renderer;
+    const prevTarget = r.getRenderTarget();
+    r.setRenderTarget(game.post.enabled ? game.post.target : null);
+    let compiling;
+    try { compiling = r.compileAsync(game.scene, game.camera); } finally { r.setRenderTarget(prevTarget); }
+    await compiling;
   } catch (e) {
     console.error('[setup] compileAsync failed', e);
   }
   if (token !== raceToken) return;
+  if (game.post.target) {
+    const r = game.renderer;
+    r.warmShadows(game.track.bounds.clone().expandByScalar(60), () => {
+      r.setRenderTarget(game.post.target);
+      r.render(game.scene, game.camera);
+      r.setRenderTarget(null);
+    });
+  }
 
   // 7.
   setPhase('intro');

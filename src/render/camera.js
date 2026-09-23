@@ -136,7 +136,11 @@ export function createCameraRig(game, camera) {
     rig.hfov = damp(rig.hfov, hf, cfg.fovHalfLife, dt);
 
     // Keep the camera above the ground under it so it never clips the road on crests.
-    const camY = Math.max(rig.height, p.y + 1.2);
+    let camY = Math.max(rig.height, p.y + 1.2);
+    // A kart falling through a void: stay above the page and look down into the cut, because below the
+    // page the camera would sit inside the book block and the trench (drawn from above) disappears.
+    const tr = game.track;
+    if (tr && p.y < tr.pageY + 1) camY = Math.max(camY, tr.pageY + 1);
 
     if (lb) {
       forwardOf(k.heading, fwd);

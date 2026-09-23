@@ -69,6 +69,13 @@ export function attachQueries(track, data, grid, cfg) {
     return best;
   }
 
+  // The water's surface beyond a water edge; the builder draws the water at this same height.
+  // def.waterLevel (absolute y) puts every water edge at one level, e.g. far below a high bridge.
+  const waterLevel = track.def && track.def.waterLevel != null ? track.def.waterLevel + 0.04 : null;
+  function waterSurface(edgeY) {
+    return Math.max(pageY + 0.05, waterLevel != null ? waterLevel : edgeY - cfg.waterDrop);
+  }
+
   const rampTmp = { id: -1, h: 0 };
 
   function rampHeightAt(dist, i) {
@@ -99,8 +106,19 @@ export function attachQueries(track, data, grid, cfg) {
     let i;
     if (hintIndex >= 0 && hintIndex < N) {
       i = nearestLocal(x, y, z, hintIndex);
-      const lim = s.halfWidth[i] + s.offroad[i] + 40;
-      if (d2At(i, x, y, z) > lim * lim) i = nearestGrid(x, y, z);
+      const band = s.halfWidth[i] + s.offroad[i];
+      const d2 = d2At(i, x, y, z);
+      const lim = band + 40;
+      if (d2 > lim * lim) i = nearestGrid(x, y, z);
+      else {
+        // Past the hinted section's offroad band (a rocket crossing, a kart run wide) another section can
+        // be nearer: hand over now, or the kart counts as 'out' and meets the old section's walls.
+        const la = ((x - s.px[i]) * s.hx[i] + (z - s.pz[i]) * s.hz[i]) / (Math.hypot(s.hx[i], s.hz[i]) || 1);
+        if (Math.abs(la) > band) {
+          const g = nearestGrid(x, y, z);
+          if (g !== i && d2At(g, x, y, z) < d2) i = g;
+        }
+      }
     } else {
       i = nearestGrid(x, y, z);
     }
@@ -180,7 +198,7 @@ export function attachQueries(track, data, grid, cfg) {
       // groundY stays the edge height so code that places things never gets -Infinity.
       if (!inBand && (edgeCode === 2 || edgeCode === 3)) {
         out.hasGround = false;
-        if (edgeCode === 3) out.waterY = Math.max(pageY + 0.05, edgeY - cfg.waterDrop);
+        if (edgeCode === 3) out.waterY = waterSurface(edgeY);
       }
     }
     return out;
@@ -237,5 +255,6 @@ export function attachQueries(track, data, grid, cfg) {
   track.pointAt = pointAt;
   track.gridSlots = gridSlots;
   track.createQueryInfo = createQueryInfo;
+  track.waterSurface = waterSurface;
   return track;
 }

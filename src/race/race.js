@@ -194,7 +194,7 @@ export function createRace(game, { laps, mode, ghostPlayer = null, ghostRecorder
     k.estimated = estimated;
     race.finishOrder.push(k.id);
     updatePlaces();
-    game.events.emit('finish', { kart: k, place: k.place, time });
+    game.events.emit('finish', { kart: k, place: k.place, time, estimated });
     if (k.isPlayer) {
       k.autopilot = true;
       if (race.state === 'running') {
@@ -264,6 +264,7 @@ export function createRace(game, { laps, mode, ghostPlayer = null, ghostRecorder
       race.finishOrder.push(e.k.id);
     }
     updatePlaces();
+    for (const e of est) game.events.emit('finish', { kart: e.k, place: e.k.place, time: e.time, estimated: true });
     buildResults();
     race.state = 'done';
     for (const k of game.karts) k.autopilot = true;

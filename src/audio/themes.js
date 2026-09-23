@@ -576,10 +576,31 @@ const finishOk = {
   form: ['f'],
 };
 
+// Final lap: lands on the "SON TUR" banner itself (the race theme only changes key on the next beat).
+// A snare roll into a brass run that lands on the new tonic with a crash; audio.js transposes it into
+// the race theme's new key.
+const finalLapSting = {
+  trim: -3, tempo: 150, beats: 2, steps: 4, key: 70, scale: 'major', once: true,
+  lanes: fanfareLanes,
+  sections: {
+    f: {
+      bars: 2, chords: ['V I', 'I'], fill: false,
+      parts: {
+        brass: "5, 1 3 5 1' - - - | - - - - . . . .",
+        horns: { comp: '. . . . X - - - | - - - - . . . .' },
+        bells: ". . . . 1 3 5 1' | 3' - - - . . . .",
+        bass: { bass: 'r . . . r - - - | - - - - . . . .' },
+        dr: { drum: { snare: 'oxxx....|........', kick: '....X...|........', crash: '....X...|........' } },
+      },
+    },
+  },
+  form: ['f'],
+};
+
 export const THEMES = { title, meadow, bosphorus, glacier, desk, results, podium };
 // Chapter id (ARCHITECTURE.md §1) → race theme. Other track ids fall back to genericTheme(def.music).
 export const CHAPTERS = { meadow, bosphorus, glacier, desk };
-export const STINGERS = { finishWin, finishGood, finishOk };
+export const STINGERS = { finishWin, finishGood, finishOk, finalLap: finalLapSting };
 
 // Fallback for a chapter without an authored theme: built from its def.music.
 const cache = new Map();

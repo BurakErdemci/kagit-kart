@@ -2,7 +2,8 @@
 // game.api.*, reads menu presses from game.input.nav and writes game.input.touch.
 import { ROSTER } from '../characters/characters.js';
 import { TRACKS, CUP } from '../track/defs/index.js';
-import { h, fmtTime } from './dom.js';
+import { h, svg, fmtTime } from './dom.js';
+import { SPEAKER } from './icons.js';
 import { buildCSS } from './style.js';
 import { createMenus, createIntroCard } from './menus.js';
 import { createHUD } from './hud.js';
@@ -100,8 +101,14 @@ export function createUI(game) {
   const fpsEl = h('div', { class: 'kk-fps' });
   fpsEl.hidden = true;
   let fpsT0 = 0, fpsFrames = 0;
+  // Audio unlocks only on a key, click or tap (§2); a gamepad press is not a user gesture in Chrome, so a
+  // pad-only player can reach the menus or a race in silence. After a second of that, ask once, quietly.
+  const soundEl = h('div', { class: 'kk-sound', role: 'status' }, svg(SPEAKER), 'Ses için bir tuşa bas ya da dokun');
+  soundEl.hidden = true;
+  const canSound = !!(window.AudioContext || window.webkitAudioContext);
+  let lockedFor = 0;
   // Hints sit under the HUD: a threat marker or a banner must never hide behind a teaching note.
-  root.append(hud.inkEl, hints.el, hudLayer, touch.el, menus.layer, introLayer, results.el, podium.el, menus.coverWrap, pause.el, fpsEl);
+  root.append(hud.inkEl, hints.el, hudLayer, touch.el, menus.layer, introLayer, results.el, podium.el, menus.coverWrap, pause.el, fpsEl, soundEl);
   touch.bindSlot(hud.slot);
   hudLayer.hidden = true;
   pause.el.hidden = true;
@@ -231,6 +238,16 @@ export function createUI(game) {
 
     if (view === 'race') hud.update(frameDt);
     hints.update(frameDt, view);
+
+    // Locked means: a pad player has no gesture yet, or a gesture created the context but it did not
+    // start. A keyboard/mouse/touch player always gestures on the title, so a missing context there
+    // only happens under test automation, which drives races through __kk.
+    const audio = game.systems?.audio;
+    const st = audio?.state;
+    const padOnly = game.input?.device === 'gamepad' || !!game.input?.pad?.connected;
+    const locked = canSound && !!audio && st !== 'running' && (st !== 'none' || padOnly) && !game.settings?.muted && !document.hidden;
+    lockedFor = locked && view !== 'title' && view !== 'none' ? lockedFor + Math.min(frameDt, 0.1) : 0;
+    if (soundEl.hidden !== lockedFor < 1) soundEl.hidden = lockedFor < 1;
 
     const showFps = !!game.settings?.showFps;
     if (fpsEl.hidden === showFps) { fpsEl.hidden = !showFps; fpsT0 = 0; fpsEl.textContent = ''; }

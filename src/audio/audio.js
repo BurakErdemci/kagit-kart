@@ -159,7 +159,7 @@ export function createAudio(game) {
   function prepareRace() {
     const t0 = performance.now();
     const th = trackTheme();
-    for (const t of [th, THEMES.results, STINGERS.finishWin, STINGERS.finishGood, STINGERS.finishOk]) A.music.prepare(t);
+    for (const t of [th, THEMES.results, STINGERS.finishWin, STINGERS.finishGood, STINGERS.finishOk, STINGERS.finalLap]) A.music.prepare(t);
     st.prepMs = Math.max(st.prepMs || 0, performance.now() - t0);
   }
 
@@ -263,8 +263,13 @@ export function createAudio(game) {
   });
   on('finalLap', (e) => {
     if (!isPlayer(e.kart) || !A) return;
-    if (st.cur && st.curKey && st.curKey.startsWith('race:')) A.music.finalLap(st.cur);
-    else play('lap', null, { important: true });
+    const r = st.cur && st.curKey && st.curKey.startsWith('race:') && ctx.state === 'running'
+      ? A.music.finalLap(st.cur, { sting: true }) : null;
+    if (r) {
+      const sting = STINGERS.finalLap;
+      A.music.play(sting, { at: ctx.currentTime + 0.01, transpose: r.key - sting.key });
+      st.stingAt = ctx.currentTime;
+    } else play('lap', null, { important: true });
   });
   on('checkpoint', (e) => {
     if (isPlayer(e.kart) && e.split != null) play(e.split <= 0 ? 'splitGood' : 'splitBad', null);

@@ -465,6 +465,11 @@ ${dkFine}
 /* ---------------------------------------------------------------- hints */
 .kk-fps{position:absolute; left:50%; bottom:calc(.35em + var(--sab)); translate:-50% 0; padding:.1em .55em; font:700 .8em var(--fb); color:var(--ink2);
   background:rgba(250,244,228,.72); font-variant-numeric:tabular-nums; pointer-events:none; z-index:5}
+/* audio still locked (a gamepad press is no user gesture): one quiet slip of paper, gone once sound runs */
+.kk-sound{position:absolute; left:50%; top:calc(.7em + var(--sat)); translate:-50% 0; rotate:.8deg; display:flex; align-items:center; gap:.45em;
+  padding:.3em .8em .35em .6em; font:700 .9em var(--fb); color:var(--ink); background:var(--paper-hi); border-radius:.15em;
+  box-shadow:.16em .2em 0 rgba(45,42,50,.8); pointer-events:none; z-index:30; white-space:nowrap}
+.kk-sound .kk-svg{width:1.35em; height:1.35em}
 .kk-hint{position:absolute; left:50%; bottom:calc(4.5% + var(--sab)); translate:-50% 0; rotate:-1.2deg; max-width:34em}
 .kk-hint .kk-paper{padding:.7em 1.3em .8em; font-weight:700; font-size:1.2em; display:flex; gap:.6em; align-items:center; flex-wrap:wrap; justify-content:center}
 .kk-hint .kk-tape{position:absolute; left:50%; top:-.7em; width:4.4em; height:1.4em; margin-left:-2.2em; background:rgba(242,193,78,.7); transform:rotate(-3deg); z-index:2}

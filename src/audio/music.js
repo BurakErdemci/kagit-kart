@@ -403,6 +403,13 @@ export function createMusic(ctx, dest, instruments, bank, opts = {}) {
 
   function pumpInstance(inst, now, horizon) {
     while (!inst.done && inst.nextTime < horizon && inst.nextTime < inst.stopAt) {
+      if (inst.pending && inst.pending.atBeat && inst.step % inst.theme.steps === 0) {
+        // cut on this beat: it becomes the downbeat of the pending section
+        inst.barStart += inst.step * stepDur(inst);
+        inst.step = 0;
+        if (!advanceSection(inst)) break;
+        inst.nextTime = stepTime(inst, 0);
+      }
       scheduleStep(inst, inst.nextTime, now);
       inst.step++;
       if (inst.step >= inst.C.spb) {
@@ -456,17 +463,35 @@ export function createMusic(ctx, dest, instruments, bank, opts = {}) {
     stopAll(fade = 0.6) {
       for (const inst of active) fadeOut(inst, fade, ctx.currentTime);
     },
-    // Key-up fanfare at the next bar, then faster and higher, jumping to the theme's climax section.
-    finalLap(inst) {
-      if (!inst || inst.done || inst.stopAt !== Infinity) return;
+    // Faster and higher, jumping to the theme's climax section. Plain: a key-up fanfare bar at the next
+    // bar. With { sting: true } the caller plays its own stinger now, so the change cuts in on the next
+    // beat instead, with the old key ducked under the stinger until then; returns { cutAt, key }.
+    finalLap(inst, o = {}) {
+      if (!inst || inst.done || inst.stopAt !== Infinity) return null;
       const fl = inst.theme.finalLap || {};
+      const sting = !!o.sting;
+      const up = fl.transpose ?? 2;
       inst.pending = {
-        atBar: true,
+        atBar: !sting,
+        atBeat: sting,
         tempoScale: fl.tempo ?? 1.12,
-        transpose: fl.transpose ?? 2,
+        transpose: up,
         form: fl.form || null,
-        queue: [...(inst.C.sections._fl ? ['_fl'] : []), ...(!fl.form && fl.section ? [fl.section] : [])],
+        queue: [...(!sting && inst.C.sections._fl ? ['_fl'] : []), ...(!fl.form && fl.section ? [fl.section] : [])],
       };
+      if (!sting) return null;
+      const S = inst.theme.steps;
+      const cutAt = inst.barStart + Math.ceil(inst.step / S) * S * stepDur(inst);
+      const now = ctx.currentTime;
+      const low = inst.level * 0.3;
+      for (const g of [inst.out, inst.wet]) {
+        g.gain.cancelScheduledValues(now);
+        g.gain.setValueAtTime(g.gain.value, now);
+        g.gain.linearRampToValueAtTime(low, now + 0.05);
+        g.gain.setValueAtTime(low, Math.max(now + 0.05, cutAt - 0.03));
+        g.gain.linearRampToValueAtTime(inst.level, Math.max(now + 0.08, cutAt + 0.01));
+      }
+      return { cutAt, key: inst.key + inst.transpose + up };
     },
     // Builds the sample banks a theme needs ahead of time (a race's themes at raceSetup, not at GO).
     prepare(theme) {

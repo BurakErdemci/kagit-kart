@@ -798,3 +798,11 @@ answers to it:
   - `logEvents` (get/set), `events(sinceSeq)`, `eventSeq()`, `setControls`, `setAutoPause`, `memory()`, `leaks()`, `layoutWarnings()`.
   - Richer `state()`, `perf()` and `stats()`.
   - `startGP({autopilot})`.
+
+### 19.2 Balance pass (23 Sep; binding over §8.1 / §10.1 where they differ)
+- `yawHigh` 1.0 rad/s at top speed (200 g: `classes[200].yawHigh = 1.15`) so hairpins need a lift or a drift.
+- Drift: `driftGrip` 12, `driftYawOut` 0.35, `driftChargeOut` 0.85, tiers at 0.8 / 1.6 / 2.7 s, tier boosts 0.6 / 1.1 / 1.6 s.
+- Slipstream: `draftCooldown` 3 s after a draft boost; no charge while the kart ahead is boosting.
+- Rubber band (`config.rubberBand`): asymmetric — CPUs behind the player get help from 20 m (max 1.06, capped at 1.03 × the player's top speed); CPUs ahead are eased only beyond 40 m and never below 0.985.
+- Stat weights: speed 0.008, accel 0.12, `statGrip` 0.1 (handling also scales grip); roster stats differ per character, each sums to 15.
+- AI: skill = pace (throttle ceiling `lerp(0.94, 1, skill)`); autopilot uses the neutral style; rocket shortcuts chosen by simulating the crossing, none above 120 g.

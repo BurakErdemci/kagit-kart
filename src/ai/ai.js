@@ -46,7 +46,31 @@ const RELEASE_YAW = 0.8;
 const DRIFT_GAIN = 2.6;         // 1/s: heading error to yaw inside a drift
 const LINE_Q_BACK = 0.6;        // share of the racing line's lateral a back-marker (skill 0.68) uses
 const DRIFT_LINE = 0.9;         // share of the line's lateral a drift follows (a slightly wider apex)
+// Throttle ceiling of a back-marker (skill 0.68); rivals (0.92) run flat out. Corners alone could not
+// separate the tiers: best laps of 0.92 and 0.80 differed by 0.02–0.5 s (QA-1 #1). Items hand the back
+// of the field ~4 rocket pens a race, so the gap has to be this wide for a 6 s+ CPU spread (measured:
+// 0.965 → 5.0 s median, 0.95 → 6.1 s, 0.94 → 7.1 s over 72 races at 120 g).
+const PACE_BACK = 0.94;
+// m before a ramp where no drift may start or continue (was 45: it cut desk's tier-2 corner before the
+// sticky-note ramp to tier 1)
+const RAMP_CLEAR = 28;
 const MODE_DRIVE = 0, MODE_HOP = 1, MODE_DRIFT = 2, MODE_SHORTCUT = 3;
+// Aim points tried per crossing, nearest first: [m past the far end, m inside the far road's near edge].
+// The first one the probe accepts is used: glacier's crossing needs a farther one than desk's, where a
+// farther one runs into a phantom wall of the section the kart came from.
+const SC_AIMS = [[14, 3], [25, 3], [40, 9]];
+const SC_BRAKE_ERR = 0.6;       // rad off the far road's direction: once on the far section (never while
+const SC_BRAKE_V = 12;          // 'out') and the rocket is spent, brake down to this m/s to finish the turn
+// Arrivals a crossing is probed for: [speed × class top, m inside the entry edge]. Real CPUs arrive
+// boosted (a trick or pad just before), wide or slow; probed only at class top, meadow's crossing failed
+// in 26 of 49 race crossings.
+const SC_ARRIVALS = [[1, 1.5], [1.3, 1.5], [1, 4], [1.3, 4], [0.85, 1.5]];
+const SC_CHECK = 80;            // m past a shortcut's far end where crossing and road are compared
+const SC_OUT_MAX = 1.6;         // s of continuous 'out' a crossing may cost (kart physics respawns at 2.0)
+const SC_MIN_GAIN = 0.8;        // s a crossing must save over the road
+// No crossings above this class top speed (m/s): at 200 g the rocket runs at 42 m/s, and crossings kept
+// ending in the next corner (glacier) or across the far road (desk: 12 of 33 respawned).
+const SC_MAX_TOP = 26;
 
 export function createAI(game) {
   const track = game.track;
@@ -63,9 +87,12 @@ export function createAI(game) {
   const CI = K.driftChargeIn, CO = K.driftChargeOut;
   const TIERS = K.driftTiers;
   const rubberK = cfg.classes[game.cls]?.rubberK ?? 0.04;
+  const YAW_HIGH = cfg.classes[game.cls]?.yawHigh ?? K.yawHigh; // what kart physics uses in this class
+  const RB = cfg.rubberBand || { behindFrom: 20, max: 1.06, playerCap: 1.03, aheadFrom: 40, aheadMin: 0.985 };
 
   // Drift shape, overridable by tests through debug.tune (read live).
-  const tune = { entryYaw: ENTRY_YAW, releaseYaw: RELEASE_YAW, driftLine: DRIFT_LINE, entryLead: 0, holdScale: 1 };
+  const tune = { entryYaw: ENTRY_YAW, releaseYaw: RELEASE_YAW, driftLine: DRIFT_LINE, entryLead: 0, holdScale: 1, paceBack: PACE_BACK, forceShortcut: 0,
+    scLead: 0, scAimIn: 0 };
 
   function idx(i) { return ((i % N) + N) % N; }
   // distance along the track from a to b in (−L/2, L/2]
@@ -124,7 +151,7 @@ export function createAI(game) {
         limL[i] = Math.max(limL[i], -3); limR[i] = Math.min(limR[i], 3);
         fade[i] = 0;
       }
-      for (let j = a - 45; j <= b + 6; j++) noDrift[idx(j)] = 1;
+      for (let j = a - Math.round(RAMP_CLEAR / sp); j <= b + 6; j++) noDrift[idx(j)] = 1;
       if (r.trick) for (let j = b - 40; j <= b; j++) trickLip[idx(j)] = r.index;
     }
     // offsets blend in over ~15 m
@@ -222,51 +249,122 @@ export function createAI(game) {
     }
   }
 
-  // Rocket-only shortcuts found by the track analysis. The analysis checks only the facing edges at the
-  // two ends, so the straight path between them is probed here once; a blocked one is never taken.
+  // Rocket-only shortcuts found by the track analysis (which checks only the facing edges at the two ends).
+  // Entries sit before hairpins, so a crossing ends nearly square to the far road, and at rocket speed
+  // normal steering (1 rad/s) needs a ~36 m radius: the AI aims at the near half of the far road, some way
+  // down it, and once there (never while 'out') brakes until the nose is close to the road's direction.
+  // (A drifted U-turn was tried: it keeps the kart by the hairpin apex, where the query never hands over.)
+  // Each crossing is probed once by driving a point kart that way, with the query hint chained as kart
+  // physics chains it: that query only hands the kart over to the far section some way down the far
+  // road, and until then the kart counts as 'out' (35% cap once the rocket ends, respawn after 2 s).
+  // Taken when, for every arrival in SC_ARRIVALS, the longest 'out' run stays under SC_OUT_MAX s and
+  // nothing blocks the way (no ground, a wall line), and it beats the road (at a rival's corner speeds)
+  // to a point SC_CHECK m past the far end by SC_MIN_GAIN s.
   const shortcuts = (track.analysis && track.analysis.shortcuts) || [];
-  const scInfo = shortcuts.map((sc) => {
+  let refProf = null;
+  const scInfo = shortcuts.map(probeAims);
+
+  function refProfile(top) {
+    if (refProf) return refProf;
+    refProf = new Float32Array(N);
+    for (let i = 0; i < N; i++) refProf[i] = cornerSpeed(Math.abs(lineK[i]) / 0.92, top, 1, 0.97);
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = N - 1; i >= 0; i--) {
+        const lim = Math.sqrt(refProf[i === N - 1 ? 0 : i + 1] ** 2 + 2 * 14 * sp);
+        if (lim < refProf[i]) refProf[i] = lim;
+      }
+    }
+    return refProf;
+  }
+
+  // A crossing must be safe for every arrival in SC_ARRIVALS; its time is the nominal (first) one.
+  function probeAims(sc) {
+    let first = null;
+    for (const [lead, aimIn] of SC_AIMS) {
+      let r = null;
+      for (const [vf, inset] of SC_ARRIVALS) {
+        const x = probeShortcut(sc, tune.scLead || lead, tune.scAimIn || aimIn, vf, inset);
+        if (!r) r = x;
+        else if (!x.ok) { r.ok = false; r.why = x.why + ' (arriving ' + vf + '× top, ' + inset + ' m in)'; }
+        r.outT = Math.max(r.outT, x.outT);
+        if (!r.ok) break;
+      }
+      if (r.ok || tune.scLead) return r;
+      if (!first) first = r;
+    }
+    return first;
+  }
+
+  function probeShortcut(sc, lead, aimIn, vf, inset) {
     const dx = px[sc.j] - px[sc.i], dz = pz[sc.j] - pz[sc.i];
     const sideI = dx * hx[sc.i] + dz * hz[sc.i] >= 0 ? 1 : -1;
     const sideJ = -dx * hx[sc.j] - dz * hz[sc.j] >= 0 ? 1 : -1;
-    const ax = px[sc.i] + hx[sc.i] * sideI * (hwA[sc.i] - 1.5), az = pz[sc.i] + hz[sc.i] * sideI * (hwA[sc.i] - 1.5);
-    const bx = px[sc.j] + hx[sc.j] * sideJ * (hwA[sc.j] - 1.5), bz = pz[sc.j] + hz[sc.j] * sideJ * (hwA[sc.j] - 1.5);
-    const len = Math.hypot(bx - ax, bz - az);
-    let ok = !!track.createQueryInfo;
-    if (ok) {
-      const q = track.createQueryInfo();
-      const pt = { x: 0, y: 0, z: 0 };
-      for (let m = 0; m <= len && ok; m += 1.5) {
-        const f = len > 0 ? m / len : 0;
-        pt.x = ax + (bx - ax) * f; pt.z = az + (bz - az) * f; pt.y = s.py[sc.i] + (s.py[sc.j] - s.py[sc.i]) * f;
-        track.query(pt, -1, q);
-        if (!q.hasGround) ok = false;
-        else if (q.edgeCode === 1 && Math.abs(q.lateral) > q.halfWidth + q.offroadWidth - K.wallInset - 1.2) ok = false;
+    const jc = idx(sc.j + Math.round(lead / sp));
+    const farH = s.heading[jc];
+    const res = { ok: false, sideI, jc, lead, aimLat: sideJ * Math.max(0, hwA[jc] - aimIn), why: '', outT: 0, t: 0, road: 0 };
+    if (!track.createQueryInfo) { res.why = 'no query'; return res; }
+    const top = cfg.classes[game.cls]?.top ?? 25;
+    if (top > SC_MAX_TOP) { res.why = 'class too fast'; return res; }
+    const rocket = K.boosts.rocket;
+    const vBoost = top * (1 + K.boostTopGain * rocket[1]);
+    const kAcc = Math.log(5) / K.accelTime;
+    const q = track.createQueryInfo();
+    const pt = { x: px[sc.i] + hx[sc.i] * sideI * (hwA[sc.i] - inset), y: s.py[sc.i], z: pz[sc.i] + hz[sc.i] * sideI * (hwA[sc.i] - inset) };
+    const dtp = 1 / 60;
+    const end = idx(sc.j + Math.round(SC_CHECK / sp));
+    let h = s.heading[sc.i], v = top * vf, t = 0, run = 0, hint = sc.i, handed = -1, tgt = jc, tLat = res.aimLat, brakeT = 0;
+    for (let n = 0; n < 10 / dtp; n++) {
+      let tx = px[tgt] + hx[tgt] * tLat, tz = pz[tgt] + hz[tgt] * tLat;
+      if (Math.hypot(tx - pt.x, tz - pt.z) < 10) { // past the aim point: keep to the far road's line
+        tgt = idx(tgt + Math.round(10 / sp)); tLat = lineLat[tgt];
+        tx = px[tgt] + hx[tgt] * tLat; tz = pz[tgt] + hz[tgt] * tLat;
       }
-      // Replay the crossing the way kart physics queries it (hint chained from the previous step): the
-      // query must hand the kart over to the far section by the time it reaches that road, or the kart
-      // would count as 'out' there and be respawned.
-      if (ok) {
-        let hint = sc.i, handed = false;
-        for (let m = 0; m <= len + 2; m += 0.5) {
-          const f = len > 0 ? Math.min(1, m / len) : 1;
-          pt.x = ax + (bx - ax) * f; pt.z = az + (bz - az) * f; pt.y = s.py[sc.i] + (s.py[sc.j] - s.py[sc.i]) * f;
-          track.query(pt, hint, q);
-          hint = q.index;
-          if (Math.abs(((q.index - sc.j + N + (N >> 1)) % N) - (N >> 1)) < 30 && q.onRoad) { handed = true; break; }
-        }
-        if (!handed) ok = false;
-      }
+      const err = angleDiff(Math.atan2(tx - pt.x, tz - pt.z), h);
+      h += clamp(err * 2.4, -1, 1) * lerp(K.yawLow, YAW_HIGH, clamp((v - K.yawLowSpeed) / Math.max(1, top - K.yawLowSpeed), 0, 1)) * dtp;
+      pt.x += Math.sin(h) * v * dtp;
+      pt.z += Math.cos(h) * v * dtp;
+      track.query(pt, hint, q);
+      hint = q.index;
+      pt.y = q.groundY;
+      if (!q.hasGround) { res.why = 'no ground'; return res; }
+      if (q.edgeCode === 1 && Math.abs(q.lateral) > q.halfWidth + q.offroadWidth - K.wallInset) { res.why = 'wall'; return res; }
+      const out = q.surface === 'out';
+      const boosting = t < rocket[0];
+      const alignErr = Math.abs(angleDiff(farH, h));
+      const rel = along(s.dist[sc.j], q.dist);
+      const onFar = rel > -60 && rel < 150;
+      const braking = !boosting && !out && onFar && v > SC_BRAKE_V && alignErr > SC_BRAKE_ERR;
+      brakeT = braking ? brakeT + dtp : 0;
+      const cap = boosting ? vBoost : out ? top * K.outCap : q.onRoad ? top : top * K.offroadCap;
+      if (braking) v = Math.max(0, v - (brakeT >= K.brakeDelay ? K.brakeDecel : K.softBrakeDecel) * dtp);
+      else if (boosting) v = Math.min(cap, v + (top * K.boostTopGain / K.boostRampTime) * dtp);
+      else if (v > cap) v = Math.max(cap, v - K.overCapDecel * dtp);
+      else v += (cap - v) * (1 - Math.exp(-kAcc * dtp));
+      t += dtp;
+      run = out ? run + dtp : 0;
+      if (run > res.outT) res.outT = run;
+      if (handed < 0 && q.onRoad && onFar && alignErr < SC_BRAKE_ERR) handed = q.index;
+      if (handed >= 0 && along(s.dist[end], q.dist) >= 0) break;
     }
-    return { ok, sideI };
-  });
+    res.t = +t.toFixed(2);
+    res.outT = +res.outT.toFixed(2);
+    if (handed < 0) { res.why = 'never handed over'; return res; }
+    let road = 0;
+    const ref = refProfile(top);
+    for (let i = sc.i; i !== end; i = idx(i + 1)) road += sp / Math.min(top, ref[i]);
+    res.road = +road.toFixed(2);
+    if (res.outT > SC_OUT_MAX) { res.why = 'out too long'; return res; }
+    if (res.t + SC_MIN_GAIN > res.road) { res.why = 'no gain'; return res; }
+    res.ok = true;
+    return res;
+  }
 
   // Highest corner-safe speed for |curvature| k with normal steering (yaw limit), times usage.
   function cornerSpeed(k, top, handling, usage) {
     if (k < 1e-4) return 1e3;
     const span = Math.max(1, top - K.yawLowSpeed);
-    let v = handling * (K.yawLow + (K.yawLow - K.yawHigh) * K.yawLowSpeed / span) / (k + handling * (K.yawLow - K.yawHigh) / span);
-    if (v > top) v = Math.max(top, handling * K.yawHigh / k);
+    let v = handling * (K.yawLow + (K.yawLow - YAW_HIGH) * K.yawLowSpeed / span) / (k + handling * (K.yawLow - YAW_HIGH) / span);
+    if (v > top) v = Math.max(top, handling * YAW_HIGH / k);
     return v * usage;
   }
 
@@ -281,7 +379,8 @@ export function createAI(game) {
   let cpuSeen = 0;
   const drivers = game.karts.map((k) => {
     const rng = baseRng.fork('driver:' + k.id);
-    const style = STYLES[k.id] || DEFAULT_STYLE;
+    // personalities are for CPUs; the autopilot stands in for the player whatever character is picked
+    const style = (!k.isPlayer && STYLES[k.id]) || DEFAULT_STYLE;
     const skill = k.isPlayer ? AUTOPILOT_SKILL : tierOrder[cpuSeen++];
     const sn = clamp((skill - 0.68) / 0.24, 0, 1); // 0 back … 1 rival
     const gradeTable = k.isPlayer ? { perfect: 1 }
@@ -331,7 +430,7 @@ export function createAI(game) {
       itemPlan: null, itemT: 0, holdFor: 0, nextTry: 0, heldFor: 0, backPref: false,
       lastAtPlayer: -99,
       threatUntil: -1, threatKind: null,
-      shortcut: -1, scT: 0, trickPressed: 0,
+      shortcut: -1, scT: 0, scCommitted: false, scPast: false, scFired: false, trickPressed: 0,
       wdT: 0, wdAcc: 0, wdDist: -1,   // progress watchdog
       phase: 0,                       // stagger for the drift-entry checks
     };
@@ -398,7 +497,18 @@ export function createAI(game) {
     },
     corners: corners.map((cr) => ({ from: cr.from, to: cr.to, arc: cr.arc, dir: cr.dir, turnDeg: Math.round(cr.turn / DEG) })),
     shortcuts,
-    shortcutOk: scInfo.map((x) => x.ok),
+    get shortcutOk() { return scInfo.map((x) => x.ok); },
+    get shortcutProbe() { return scInfo.map((x) => ({ ok: x.ok, why: x.why, lead: x.lead, outT: x.outT, t: x.t, road: x.road })); },
+    shortcutTried: new Int32Array(shortcuts.length),
+    shortcutTaken: new Int32Array(shortcuts.length),
+    // tests that teleport a kart call this so no mode, drift or item plan carries over
+    reprobe() { for (let q = 0; q < shortcuts.length; q++) scInfo[q] = probeAims(shortcuts[q]); return scInfo.map((x) => x.ok); },
+    resetDriver(kart) {
+      const d = byKart.get(kart);
+      if (!d) return;
+      d.mode = MODE_DRIVE; d.shortcut = -1; d.scCommitted = false; d.scPast = false; d.scFired = false; d.scT = 0;
+      d.dyn = 0; d.itemPlan = null; d.stuckT = 0; d.reverseT = 0; d.wdT = 0; d.wdAcc = 0; d.wdDist = -1;
+    },
     lineLat,
   };
 
@@ -442,17 +552,20 @@ export function createAI(game) {
     }
   }
 
-  // §10.1: clamp(1 + k·gap/100, 0.95, 1.06), off within 20 m, never lifting a CPU above 1.03× the
-  // player's unboosted top (a CPU whose own top is already above that is simply not lifted).
+  // Asymmetric band (config.rubberBand): a CPU behind the player gets 1 + k·gap/100 beyond behindFrom m,
+  // never lifted above playerCap × the player's unboosted top (a CPU whose own top is already above that
+  // is simply not lifted); a CPU ahead is only eased beyond aheadFrom m, and never below aheadMin.
   function rubberBand(d, player) {
     const k = d.kart;
     if (k.isPlayer || !player || player === k) { k.rubberBand = 1; return; }
     const gap = player.progress - k.progress;
     let rb = 1;
-    if (gap > 20 || gap < -20) {
-      rb = clamp(1 + rubberK * gap / 100, 0.95, 1.06);
-      const cap = Math.max(1, (player.baseTop * 1.03) / Math.max(1, k.baseTop));
+    if (gap > RB.behindFrom) {
+      rb = Math.min(1 + rubberK * (gap - RB.behindFrom) / 100, RB.max);
+      const cap = Math.max(1, (player.baseTop * RB.playerCap) / Math.max(1, k.baseTop));
       if (rb > cap) rb = cap;
+    } else if (gap < -RB.aheadFrom) {
+      rb = Math.max(1 + rubberK * (gap + RB.aheadFrom) / 100, RB.aheadMin);
     }
     k.rubberBand = rb;
   }
@@ -460,7 +573,7 @@ export function createAI(game) {
   function endDrift(d, reason) {
     const k = d.kart;
     if (debug.log && d.mode === MODE_DRIFT) {
-      debug.drifts.push({ id: k.id, corner: d.corner, tier: k.drift.tier, charge: +k.drift.charge.toFixed(2), turnDeg: Math.round(d.driftTurn / DEG), t: +d.driftT.toFixed(2), reason, lat: +k.trackInfo.lateral.toFixed(1), raceTime: +game.raceTime.toFixed(2) });
+      debug.drifts.push({ id: k.id, corner: d.corner, idx: k.trackInfo.index, tier: k.drift.tier, charge: +k.drift.charge.toFixed(2), turnDeg: Math.round(d.driftTurn / DEG), t: +d.driftT.toFixed(2), reason, lat: +k.trackInfo.lateral.toFixed(1), raceTime: +game.raceTime.toFixed(2) });
     }
     d.mode = MODE_DRIVE;
     d.releaseAt = game.raceTime;
@@ -493,14 +606,20 @@ export function createAI(game) {
       if (o === k || o.respawn.active) continue;
       const ahead = along(myD, o.trackInfo.dist);
       const dl = o.trackInfo.lateral - myLat;
-      if (d.style.bump > 0 && ahead > -2.5 && ahead < 2.5 && Math.abs(dl) > 2.3 && Math.abs(dl) < 4) {
-        want += Math.sign(dl) * 0.8 * d.style.bump; // lean into a kart alongside
+      if (ahead > -2.5 && ahead < 2.5 && Math.abs(dl) < 4) {
+        // alongside: a bully leans in, everyone else keeps a car's width of air (side-by-side scraping
+        // was most of the ~500 bumps a race, QA-1 #2)
+        if (d.style.bump > 0 && Math.abs(dl) > 2.3) want += Math.sign(dl) * 0.8 * d.style.bump;
+        else if (d.style.bump < 0.5) want -= (dl >= 0 ? 1 : -1) * (3.2 - Math.abs(dl)) * 0.8;
         continue;
       }
-      if (ahead <= 0 || ahead > 16) continue;
+      // look further ahead the faster we close in: rear-ending a slower kart on a boost was the most
+      // common bump
+      const range = 16 + 1.5 * Math.max(0, speed - o.speed);
+      if (ahead <= 0 || ahead > range) continue;
       if (Math.abs(dl) < 2.6 && o.speed < speed + 1) {
-        want += (dl >= 0 ? -1 : 1) * (2.8 - Math.abs(dl)) * (1.3 - ahead / 16);
-      } else if (ahead > 5 && Math.abs(dl) < 5 && o.speed > 0.6 * top) {
+        want += (dl >= 0 ? -1 : 1) * (2.8 - Math.abs(dl)) * (1.3 - ahead / range);
+      } else if (ahead > 5 && ahead < 16 && Math.abs(dl) < 5 && o.speed > 0.6 * top) {
         want += dl * 0.12 * d.style.draft; // tuck in for the slipstream
       }
     }
@@ -539,49 +658,80 @@ export function createAI(game) {
     let tx = px[j] + hx[j] * lat;
     let tz = pz[j] + hz[j] * lat;
 
-    // --- rocket shortcut: follow the road to the gap, cut across only on a live rocket boost
+    // --- rocket shortcut: follow the road to the gap, cut across only on a live rocket boost. Entries sit
+    // just before hairpins, so the decision comes before any drift: a drift in progress is cashed in and
+    // no new one starts while a usable entry is near.
     const hasRocket = (k.item === 'rocket' || k.item === 'rocket3') && !(k.roulette > 0);
+    let scNear = -1, scTo = 0;
+    if (hasRocket && items && d.mode !== MODE_SHORTCUT) {
+      for (let q = 0; q < shortcuts.length; q++) {
+        if (!scInfo[q].ok && !tune.forceShortcut) continue;
+        const toEntry = along(myD, s.dist[shortcuts[q].i]);
+        if (toEntry > 0 && toEntry < 45 + speed * 0.8) { scNear = q; scTo = toEntry; break; }
+      }
+      if (scNear >= 0 && (d.mode === MODE_HOP || d.mode === MODE_DRIFT)) endDrift(d, 'shortcut');
+    }
+    let scBrake = false;
     if (d.mode === MODE_SHORTCUT) {
       const sc = shortcuts[d.shortcut];
       d.scT += dt;
       const toEntry = sc ? along(myD, s.dist[sc.i]) : 0;
       const committed = !info.onRoad || k.boostTime > 0.1;
-      if (!sc || (along(s.dist[sc.j], myD) > 4 && info.onRoad) || d.scT > 3.5 || k.wallContact ||
-          (toEntry <= 0.5 && !committed) || (toEntry < -15 && info.onRoad && along(s.dist[sc.j], myD) < -20)) {
+      if (committed && toEntry <= 0.5 && !d.scCommitted) {
+        d.scCommitted = true;
+        d.scT = 0;
+        if (debug.shortcutTaken) debug.shortcutTaken[d.shortcut]++;
+      }
+      const si = sc ? scInfo[d.shortcut] : null;
+      const rel = sc ? along(s.dist[sc.j], myD) : 0; // m past the far end by our own query
+      const onFar = rel > -60 && rel < 150;
+      const alignErr = si ? Math.abs(angleDiff(s.heading[onFar ? info.index : si.jc], k.heading)) : 0;
+      // before the entry: give up on a wall, a timeout, or reaching it without a boost; once across,
+      // keep going until the far road is ours and we point down it
+      const abort = d.scCommitted ? d.scT > 6
+        : d.scT > 4 || k.wallContact || (toEntry <= 0.5 && !committed) || (toEntry < -15 && info.onRoad && along(s.dist[sc.j], myD) < -20);
+      if (!sc || abort || (d.scCommitted && onFar && info.onRoad && (alignErr < SC_BRAKE_ERR || rel > 25))) {
         d.mode = MODE_DRIVE; d.shortcut = -1;
       } else if (toEntry > 0.5) {
         const ji = idx(sc.i + 2);
-        const sl = scInfo[d.shortcut].sideI * (hwA[ji] - 1.5);
+        const sl = si.sideI * (hwA[ji] - 1.5);
         tx = px[ji] + hx[ji] * sl;
         tz = pz[ji] + hz[ji] * sl;
       } else {
-        const jj = idx(sc.j + 14);
-        tx = px[jj] + hx[jj] * lineLat[jj];
-        tz = pz[jj] + hz[jj] * lineLat[jj];
+        let jj = si.jc, lt = si.aimLat;
+        if (d.scPast || Math.hypot(px[jj] + hx[jj] * lt - k.pos.x, pz[jj] + hz[jj] * lt - k.pos.z) < 10) {
+          d.scPast = true; // past the aim point: the far road's line
+          jj = idx((onFar ? info.index : si.jc) + Math.round(12 / sp));
+          lt = lineLat[jj];
+        }
+        tx = px[jj] + hx[jj] * lt;
+        tz = pz[jj] + hz[jj] * lt;
+        scBrake = k.boostTime <= 0 && k.surface !== 'out' && onFar && speed > SC_BRAKE_V && alignErr > SC_BRAKE_ERR;
       }
-    } else if (hasRocket && items && d.mode === MODE_DRIVE && shortcuts.length) {
-      for (let q = 0; q < shortcuts.length; q++) {
-        if (!scInfo[q].ok) continue;
-        const toEntry = along(myD, s.dist[shortcuts[q].i]);
-        if (toEntry > 0 && toEntry < 18 + speed * 0.5) { d.mode = MODE_SHORTCUT; d.shortcut = q; d.scT = 0; break; }
-      }
+    } else if (scNear >= 0 && d.mode === MODE_DRIVE && scTo < 30 + speed * 0.8) {
+      d.mode = MODE_SHORTCUT; d.shortcut = scNear; d.scT = 0; d.scCommitted = false; d.scPast = false; d.scFired = false;
+      if (debug.shortcutTried) debug.shortcutTried[scNear]++;
     }
 
     const desired = Math.atan2(tx - k.pos.x, tz - k.pos.z);
     const err = angleDiff(desired, k.heading); // + = target is to the left
-    const kAhead = lineK[j];
+    const kAhead = d.mode === MODE_SHORTCUT ? 0 : lineK[j];
 
     // --- speed target from the precomputed profile (already holds the braking distance)
-    let throttle = 1, brake = 0;
+    // flat out on a ramp run-up: jumps are laid out for full speed (glacier's crevasse ate 94% karts)
+    const pace = k.isPlayer || noDrift[i0] ? 1 : lerp(tune.paceBack, 1, d.sn);
+    let throttle = pace, brake = 0;
     if (d.mode === MODE_DRIVE) {
       let vt = d.prof[idx(i0 + Math.ceil((2 + speed * 0.15) / sp))];
       if (d.mistake === 2 && cr) vt = Math.min(vt, top * 0.82);
       if (speed > vt + 0.3) throttle = 0;
       if (speed > vt + 2.5) brake = 1;
+    } else if (scBrake) {
+      throttle = 0; brake = 1;
     }
 
     // --- steering (normal): pursuit plus a curvature feed-forward
-    let steer = clamp(-err * 2.4 - kAhead * speed / Math.max(0.5, K.yawHigh * d.handling) * 0.5, -1, 1);
+    let steer = clamp(-err * 2.4 - kAhead * speed / Math.max(0.5, YAW_HIGH * d.handling) * 0.5, -1, 1);
     let drift = false;
 
     // --- trick ramps: press drift just before the lip (edge; no drift carried onto a ramp)
@@ -603,7 +753,7 @@ export function createAI(game) {
     if (d.mode === MODE_HOP) {
       drift = true;
       steer = -d.hopDir * HOP_AIR_STEER;
-      throttle = 1; brake = 0;
+      throttle = pace; brake = 0;
       if (k.drift.active) { d.mode = MODE_DRIFT; d.driftT = 0; d.driftTurn = 0; d.lastH = k.heading; }
       else if (k.grounded && !k.hop.active) d.mode = MODE_DRIVE; // landed without a drift
     } else if (d.mode === MODE_DRIFT) {
@@ -613,7 +763,7 @@ export function createAI(game) {
         if (r) endDrift(d, r);
         else { drift = true; steer = d.driftS * k.drift.dir; }
       }
-    } else if (d.mode === MODE_DRIVE && !debug.noDrift && !noDrift[i0] && lipRamp < 0 && !onTrick && d.mistake !== 4 && info.onRoad &&
+    } else if (d.mode === MODE_DRIVE && scNear < 0 && !debug.noDrift && !noDrift[i0] && lipRamp < 0 && !onTrick && d.mistake !== 4 && info.onRoad &&
                k.grounded && !k.hop.active && speed > Math.max(12, K.driftMinStart + 2) && now - d.releaseAt > 0.35 &&
                !c.drift && k.spinTime <= 0 && d.reverseT <= 0 && ((stepCount + d.phase) & 1) === 0) {
       const D = driftStart(d, speed);
@@ -727,7 +877,7 @@ export function createAI(game) {
     // pursuit of the line (with the personal offset, kept on the road) on the direction of travel; the
     // apex is taken a little wider than the racing line, which leaves room and charges longer
     const j = idx(i0 + Math.round((4 + v * 0.3) / sp));
-    let lat = lineLat[j] * d.lineQ * tune.driftLine + d.offset * fade[j];
+    let lat = lineLat[j] * d.lineQ * tune.driftLine + d.offset * fade[j] + 0.5 * d.dyn;
     if (d.mistake === 1) lat -= D * 3;
     lat = clamp(lat, -hwA[j] + 1.2, hwA[j] - 1.2);
     const tx = px[j] + hx[j] * lat, tz = pz[j] + hz[j] * lat;
@@ -752,10 +902,10 @@ export function createAI(game) {
       const need = (TIERS[tier] - k.drift.charge) / driftRate(d.sMin);
       if (need > d.tierHold * tune.holdScale) return 'exit';
       // Hold, turning as little as possible, for the tier just ahead, if the road has room for the
-      // extra rotation and for straightening afterwards (normal steering at ~1.2 rad/s).
+      // extra rotation and for straightening afterwards (normal steering at top-speed yaw).
       const psi = -D * angleDiff(vh, s.heading[i0]) + d.yawMin * need;
       const drift = v * need * (-D * angleDiff(vh, s.heading[i0]) + 0.5 * d.yawMin * need);
-      if (D * info.lateral + drift + v * psi * Math.max(0, psi) / 2.4 > hwA[i0] - 1.0) return 'exit';
+      if (D * info.lateral + drift + v * psi * Math.max(0, psi) / (2 * YAW_HIGH * d.handling) > hwA[i0] - 1.0) return 'exit';
       d.driftS = d.sMin;
       return null;
     }
@@ -805,9 +955,9 @@ export function createAI(game) {
       case 'rocket3': {
         if (d.mode === MODE_SHORTCUT) {
           const sc = shortcuts[d.shortcut];
-          if (sc && !(k.boostTime > 0.15)) {
+          if (sc && !d.scFired && !(k.boostTime > 0.15)) { // one pen per crossing
             const toEntry = along(k.trackInfo.dist, s.dist[sc.i]);
-            if (toEntry < 3 || !k.trackInfo.onRoad) press(d, c, now);
+            if (toEntry < 3 || !k.trackInfo.onRoad) { press(d, c, now); d.scFired = c.item; }
           }
           return;
         }
@@ -964,7 +1114,7 @@ export function createAI(game) {
   // A usable rocket shortcut starts within `metres` ahead.
   function shortcutAhead(k, metres) {
     for (let q = 0; q < shortcuts.length; q++) {
-      if (!scInfo[q].ok) continue;
+      if (!scInfo[q].ok && !tune.forceShortcut) continue;
       const a = along(k.trackInfo.dist, s.dist[shortcuts[q].i]);
       if (a > 0 && a < metres) return true;
     }

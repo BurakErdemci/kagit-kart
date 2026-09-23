@@ -10,17 +10,32 @@ export const config = {
     body: 'system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
   },
 
+  // yawHigh (steering yaw at top speed, overrides kart.yawHigh): at 200 g 1.0 meant a 30 m radius and
+  // CPUs, the autopilot too, ran off glacier's ridge after the second switchback; 1.15 is 26 m.
   classes: {
     80: { top: 20, rubberK: 0.05 },
     120: { top: 25, rubberK: 0.04 },
-    200: { top: 30, rubberK: 0.03 },
+    200: { top: 30, rubberK: 0.03, yawHigh: 1.15 },
   },
+
+  // CPU top-speed multiplier (§10.1), asymmetric since QA-1 #2: a symmetric band slowed CPUs ahead of the
+  // player to 0.95, so leaders never escaped and the field raced as one bumper-car pack (CPU winner-to-
+  // last 2.9 s median). CPUs behind: 1 + rubberK·gap/100 beyond behindFrom m, up to max and at most
+  // playerCap × the player's unboosted top. CPUs ahead: only beyond aheadFrom m, ramping from there,
+  // never below aheadMin.
+  rubberBand: { behindFrom: 20, max: 1.06, playerCap: 1.03, aheadFrom: 40, aheadMin: 0.985 },
 
   kart: {
     radius: 1.1,
-    statSpeed: 0.03,
-    statAccel: 0.08,
+    // Per stat point from 3. At speed 0.03 / accel 0.08 / handling 0.06 (yaw only) a speed point was worth
+    // 3.2 s a race and an accel or handling point 0.6 and ~0 s (QA-1 #21), so speed decided every pick.
+    // Handling also scales grip now: every corner and drift bleeds speed at ≈ speed·yaw²/grip. With these
+    // weights the eight picks land within ±0.65 s a race of each other (48 races each, autopilot) and
+    // ±0.85 s solo (tools/scenarios/balance.mjs --mode chars).
+    statSpeed: 0.008,
+    statAccel: 0.12,
     statHandling: 0.06,
+    statGrip: 0.1,
     statWeight: 0.15,
     statOffroad: 0.04,
 
@@ -34,7 +49,9 @@ export const config = {
     reverseAccel: 9,
 
     yawLow: 2.4,
-    yawHigh: 1.3,
+    // 1.3 (§8.1) let a kart hold a 19 m radius at 25 m/s, tighter than any corner, so every corner was flat
+    // out and no skill or drift showed (QA-1 #1). At 1.0 hairpins need a lift or a drift.
+    yawHigh: 1.0,
     yawLowSpeed: 8,
     // Below this speed yaw scales down linearly so a stopped kart cannot spin on the spot.
     yawFullSpeed: 3.5,
@@ -43,7 +60,9 @@ export const config = {
     airYaw: 0.3,
 
     grip: 14,
-    driftGrip: 7,
+    // Forward speed bleeds at ≈ speed·yaw²/grip while turning. At 7 a neutral drift settled near 20 m/s and
+    // an inside one near 16 m/s (of 25), which ate most of the drift boost (QA-1 #3: drifting paid 1–3%).
+    driftGrip: 12,
     iceGrip: 0.35,
 
     hopVy: 3.2,
@@ -51,10 +70,14 @@ export const config = {
     driftMinHold: 7,
     driftYawNeutral: 1.1,
     driftYawIn: 1.7,
-    driftYawOut: 0.45,
+    // Out-steer drifts follow gentler arcs (71 m radius at 25 m/s instead of 56), so long sweepers can be
+    // drifted too; charge while steering out is only mildly slower. Tiers sized to the layout rules: a
+    // 45 m tier-2 corner and an 80 m tier-3 corner at 120 g (§8.1 had 1.0/2.2/3.5 with out ×0.6: CPUs
+    // released 0.5–2 tier-2+ drifts a lap, QA-1 #3).
+    driftYawOut: 0.35,
     driftChargeIn: 1.5,
-    driftChargeOut: 0.6,
-    driftTiers: [1.0, 2.2, 3.5],
+    driftChargeOut: 0.85,
+    driftTiers: [0.8, 1.6, 2.7],
     driftVisualYaw: 28 * Math.PI / 180,
     driftVisualSteer: 10 * Math.PI / 180,
     driftSteerDeadzone: 0.2,
@@ -62,7 +85,7 @@ export const config = {
     boostTopGain: 0.35,
     boostRampTime: 0.3,
     boosts: {
-      tier1: [0.45, 1], tier2: [0.9, 1], tier3: [1.4, 1],
+      tier1: [0.6, 1], tier2: [1.1, 1], tier3: [1.6, 1],
       start: [1.0, 1], weakStart: [0.4, 1], trick: [0.8, 1], pad: [1.0, 1],
       rocket: [1.3, 1.15], draft: [0.9, 0.6], respawn: [0.5, 1],
     },
@@ -72,6 +95,9 @@ export const config = {
     draftMinSpeed: 0.6,
     draftCharge: 1.2,
     draftDecay: 0.6,
+    // No new charge for this long after a draft boost, and none behind a kart that is itself boosting:
+    // without both a pack chained draft boosts every 1.2 s (~150 a race, QA-1 #2).
+    draftCooldown: 3,
 
     offroadCap: 0.55,
     sandCap: 0.8,

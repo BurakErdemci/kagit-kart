@@ -6,12 +6,15 @@ const fwd = { x: 0, y: 0, z: 0 };
 export function createCollisions(game) {
   const K = game.config.kart;
   let cool = new Float32Array(64);
+  let draftCool = new Float32Array(8);
   let n = 0;
 
   function reset(count) {
     n = count;
     if (cool.length < n * n) cool = new Float32Array(n * n);
+    if (draftCool.length < n) draftCool = new Float32Array(n);
     cool.fill(0);
+    draftCool.fill(0);
   }
 
   function step(dt) {
@@ -53,17 +56,19 @@ export function createCollisions(game) {
       }
     }
 
-    // Slipstream: ≤ 14 m behind another kart, inside ±12° of its heading, at ≥ 60% of top speed.
+    // Slipstream: ≤ 14 m behind another kart, inside ±12° of its heading, at ≥ 60% of top speed; not
+    // within draftCooldown s of the last draft boost, and not behind a kart that is boosting.
     const cosCone = Math.cos(K.draftCone);
     for (let i = 0; i < karts.length; i++) {
       const k = karts[i];
+      if (draftCool[i] > 0) draftCool[i] -= dt;
       if (k.respawn.active || k.pinned || !k.grounded) { k.draft.charge = 0; continue; }
       let inDraft = false;
-      if (k.speed >= K.draftMinSpeed * k.topSpeed) {
+      if (k.speed >= K.draftMinSpeed * k.topSpeed && draftCool[i] <= 0) {
         for (let j = 0; j < karts.length; j++) {
           if (j === i) continue;
           const o = karts[j];
-          if (o.respawn.active) continue;
+          if (o.respawn.active || o.boostTime > 0) continue;
           const dx = k.pos.x - o.pos.x, dz = k.pos.z - o.pos.z;
           const d2 = dx * dx + dz * dz;
           if (d2 > K.draftRange * K.draftRange || d2 < 1) continue;
@@ -78,6 +83,7 @@ export function createCollisions(game) {
         k.draft.charge += dt / K.draftCharge;
         if (k.draft.charge >= 1) {
           k.draft.charge = 0;
+          draftCool[i] = K.draftCooldown;
           const b = K.boosts.draft;
           game.events.emit('draft', { kart: k, state: 'boost' });
           k.applyBoost(b[0], b[1], 'draft');

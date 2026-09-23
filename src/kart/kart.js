@@ -115,6 +115,7 @@ export class Kart {
     const top = this.game.config.classes[this.cls]?.top ?? 25;
     this.baseTop = top * (1 + k.statSpeed * (this.stats.speed - 3));
     this.topSpeed = this.baseTop;
+    this.yawHigh = this.game.config.classes[this.cls]?.yawHigh ?? k.yawHigh;
   }
 
   // Place on the track (grid, teleport). Clears motion and interpolation history.
@@ -391,7 +392,7 @@ export class Kart {
     } else {
       const sp = Math.abs(f);
       const tYaw = clamp((sp - K.yawLowSpeed) / Math.max(1, this.topSpeed - K.yawLowSpeed), 0, 1);
-      let yaw = lerp(K.yawLow, K.yawHigh, tYaw) * handling * clamp(sp / K.yawFullSpeed, 0, 1);
+      let yaw = lerp(K.yawLow, this.yawHigh, tYaw) * handling * clamp(sp / K.yawFullSpeed, 0, 1);
       if (!this.grounded) yaw *= K.airYaw;
       if (surf === 'sand') yaw *= K.sandYaw;
       this.heading -= this.steerIn * yaw * (f >= 0 ? 1 : -1) * dt;
@@ -403,7 +404,7 @@ export class Kart {
     rightOf(this.heading, _R2);
     let f2 = vx * _F2.x + vz * _F2.z;
     let lat2 = vx * _R2.x + vz * _R2.z;
-    let grip = d.active ? K.driftGrip : K.grip;
+    let grip = (d.active ? K.driftGrip : K.grip) * (1 + K.statGrip * (this.stats.handling - 3));
     if (surf === 'ice') grip *= K.iceGrip;
     if (!this.grounded) grip *= 0.15;
     lat2 *= Math.exp(-grip * dt);

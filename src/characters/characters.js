@@ -8,18 +8,16 @@ import { buildModel, atlasSpec } from './models.js';
 import { geometryFromArrays } from './paperkit.js';
 import { createPose } from './animate.js';
 
-// Stats are 1..5 summing to 15. Measured on the core as built (solo autopilot, 3 laps): one speed point is
-// worth ~4.4 s, the whole accel range ~0.45 s, the whole handling range ~0.2 s. Nothing else can pay for a
-// speed point, so speed is flat at 3 for every pick (bear at 4 was ~4 s ahead of the field); identity
-// lives in accel, handling, weight and offroad until config.kart re-weights the stats (CORE_REQUEST).
+// Stats are 1..5 summing to 15. config.kart weights them so a point of speed, accel or handling is worth
+// about the same in a race (QA-1 #21); every pick was measured within ±0.65 s a race of the roster mean.
 export const ROSTER = [
   { id: 'tilki', name: 'Tarçın', animal: 'tilki', colors: { body: '#e8792e', accent: '#fbf1df', kart: '#e8552b', detail: '#2e2b33' }, stats: { speed: 3, accel: 3, handling: 3, weight: 3, offroad: 3 }, voice: { pitch: 1.1 } },
-  { id: 'kurbaga', name: 'Nilüfer', animal: 'kurbağa', colors: { body: '#86cc45', accent: '#e9f2a6', kart: '#2f9a55', detail: '#f39ac0' }, stats: { speed: 3, accel: 3, handling: 3, weight: 2, offroad: 4 }, voice: { pitch: 0.92 } },
-  { id: 'penguen', name: 'Paytak', animal: 'penguen', colors: { body: '#2d3140', accent: '#fbfbf6', kart: '#3b82d9', detail: '#e2383f' }, stats: { speed: 3, accel: 3, handling: 2, weight: 4, offroad: 3 }, voice: { pitch: 1.18 } },
-  { id: 'ayi', name: 'Pofuduk', animal: 'ayı', colors: { body: '#8b5a34', accent: '#e7c396', kart: '#f4bd2e', detail: '#c4622d' }, stats: { speed: 3, accel: 1, handling: 3, weight: 5, offroad: 3 }, voice: { pitch: 0.72 } },
-  { id: 'kedi', name: 'Kömür', animal: 'kedi', colors: { body: '#2c2a33', accent: '#f5d33f', kart: '#d02f3f', detail: '#27a2b8' }, stats: { speed: 3, accel: 4, handling: 5, weight: 1, offroad: 2 }, voice: { pitch: 1.26 } },
+  { id: 'kurbaga', name: 'Nilüfer', animal: 'kurbağa', colors: { body: '#86cc45', accent: '#e9f2a6', kart: '#2f9a55', detail: '#f39ac0' }, stats: { speed: 3, accel: 4, handling: 3, weight: 1, offroad: 4 }, voice: { pitch: 0.92 } },
+  { id: 'penguen', name: 'Paytak', animal: 'penguen', colors: { body: '#2d3140', accent: '#fbfbf6', kart: '#3b82d9', detail: '#e2383f' }, stats: { speed: 4, accel: 2, handling: 2, weight: 3, offroad: 4 }, voice: { pitch: 1.18 } },
+  { id: 'ayi', name: 'Pofuduk', animal: 'ayı', colors: { body: '#8b5a34', accent: '#e7c396', kart: '#f4bd2e', detail: '#c4622d' }, stats: { speed: 5, accel: 1, handling: 2, weight: 5, offroad: 2 }, voice: { pitch: 0.72 } },
+  { id: 'kedi', name: 'Kömür', animal: 'kedi', colors: { body: '#2c2a33', accent: '#f5d33f', kart: '#d02f3f', detail: '#27a2b8' }, stats: { speed: 2, accel: 4, handling: 5, weight: 2, offroad: 2 }, voice: { pitch: 1.26 } },
   { id: 'baykus', name: 'Pervane', animal: 'baykuş', colors: { body: '#b3814a', accent: '#f1dfb8', kart: '#4a3d93', detail: '#d4a13d' }, stats: { speed: 3, accel: 3, handling: 4, weight: 2, offroad: 3 }, voice: { pitch: 0.95 } },
-  { id: 'tavsan', name: 'Havuç', animal: 'tavşan', colors: { body: '#f5f1e8', accent: '#f3a3be', kart: '#ee6aa7', detail: '#f08a2e' }, stats: { speed: 3, accel: 5, handling: 4, weight: 1, offroad: 2 }, voice: { pitch: 1.36 } },
+  { id: 'tavsan', name: 'Havuç', animal: 'tavşan', colors: { body: '#f5f1e8', accent: '#f3a3be', kart: '#ee6aa7', detail: '#f08a2e' }, stats: { speed: 2, accel: 5, handling: 4, weight: 1, offroad: 3 }, voice: { pitch: 1.36 } },
   { id: 'ahtapot', name: 'Mürekkep', animal: 'ahtapot', colors: { body: '#8e4cc2', accent: '#e2c2f5', kart: '#1fb5b0', detail: '#f5d547' }, stats: { speed: 3, accel: 2, handling: 4, weight: 4, offroad: 2 }, voice: { pitch: 0.85 } },
 ];
 

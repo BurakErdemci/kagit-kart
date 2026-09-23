@@ -4,7 +4,7 @@
 // writes an instance once, at spawn, into a ring buffer.
 import * as THREE from 'three';
 
-export const SHAPE = { TRI: 0, SLIVER: 1, STAR: 2, RECT: 3, PUFF: 4, STROKE: 5 };
+export const SHAPE = { TRI: 0, SLIVER: 1, STAR: 2, RECT: 3, PUFF: 4, STROKE: 5, ZAP: 6 };
 export const MODE = { TUMBLE: 0, SPIN: 1, FLIP: 2, STREAK: 3 };
 export const GROW = { POP: 0, PUFF: 1 };
 
@@ -188,6 +188,16 @@ float sdPuff( vec2 p, float seed, out float facet, out float crease ) {
   return min( length( p ) - 0.5, best );
 }
 
+// Cut-paper spark burst: eight spikes, long and short in turn, around a solid core.
+float sdZap( vec2 p, float seed ) {
+  float r = length( p );
+  float a = atan( p.y, p.x ) / 6.2831853 * 8.0 + seed * 2.0;
+  float f = abs( fract( a ) - 0.5 ) * 2.0;
+  float tip = mod( floor( a ), 2.0 ) < 0.5 ? 0.98 : 0.74;
+  float edge = 0.52 + ( tip - 0.52 ) * pow( 1.0 - f, 1.25 );
+  return ( r - edge ) * 0.75;
+}
+
 void main() {
   vec2 p = vUv;
   float id = vInfo.x;
@@ -209,11 +219,13 @@ void main() {
   } else if ( id < 4.5 ) {
     d = sdPuff( p, seed, facet, crease );
     shade = 0.78 + 0.22 * hash1( seed * 7.7 + facet * 3.3 );
-  } else {
+  } else if ( id < 5.5 ) {
     // ink stroke: thick head (+y), thin tail, fading tail
     float t = p.y * 0.5 + 0.5;
     d = abs( p.x ) - 0.95 * ( 0.2 + 0.8 * t * t ) * ( 1.0 - smoothstep( 0.86, 1.0, t ) * 0.9 );
     alphaK = 0.8 * smoothstep( 0.0, 0.45, t );
+  } else {
+    d = sdZap( p, seed );
   }
   float w = max( fwidth( d ), 1e-4 );
   float alpha = ( 1.0 - smoothstep( -w * 0.5, w * 0.5, d ) ) * alphaK;
@@ -230,7 +242,7 @@ void main() {
   // cut edge inked about 1.3 px wide; fades out when the piece is only a few pixels big
   float lineW = 1.3 * w;
   float edge = smoothstep( -lineW - w * 0.5, -lineW + w * 0.5, d ) * smoothstep( 0.4, 0.14, w );
-  if ( id > 4.5 ) edge = 0.0;
+  if ( id > 4.5 && id < 5.5 ) edge = 0.0;
   if ( facet >= 0.0 ) {
     float seam = ( 1.0 - smoothstep( w * 0.8, w * 2.2, crease ) ) * smoothstep( 0.0, -w * 3.0, d );
     edge = max( edge, seam * 0.45 * smoothstep( 0.4, 0.14, w ) );
@@ -300,6 +312,7 @@ export function createBits(game, { capacity = 2048 } = {}) {
     drag: 2, grav: 9, floor: -1e4,
     shape: SHAPE.TRI, size: 0.1, mode: MODE.TUMBLE, spin: 10, fold: 0.8, aspect: 1, flutter: 0,
     colA: new THREE.Color(1, 1, 1), glow: 0, colB: new THREE.Color(1, 1, 1), grow: GROW.POP,
+    seed: -1, // ≥ 0 pins the piece's seed (layers of one cut-out must share it); reset after each emit
   };
 
   function heightAt(t, y0, vy0, k, g) {
@@ -341,7 +354,8 @@ export function createBits(game, { capacity = 2048 } = {}) {
     let a = arr.aP0; a[o] = s.x; a[o + 1] = s.y; a[o + 2] = s.z; a[o + 3] = t0;
     a = arr.aV0; a[o] = s.vx; a[o + 1] = s.vy; a[o + 2] = s.vz; a[o + 3] = s.life;
     a = arr.aPhys; a[o] = s.drag; a[o + 1] = s.grav; a[o + 2] = s.floor; a[o + 3] = landingAge(s);
-    a = arr.aShape; a[o] = s.shape; a[o + 1] = s.size; a[o + 2] = (spawned * 0.618034 + Math.abs(s.x) * 0.013) % 1; a[o + 3] = s.mode;
+    a = arr.aShape; a[o] = s.shape; a[o + 1] = s.size; a[o + 3] = s.mode;
+    a[o + 2] = s.seed >= 0 ? s.seed : (spawned * 0.618034 + Math.abs(s.x) * 0.013) % 1;
     a = arr.aLook; a[o] = s.spin; a[o + 1] = s.fold; a[o + 2] = s.aspect; a[o + 3] = s.flutter;
     a = arr.aColA; a[o] = s.colA.r; a[o + 1] = s.colA.g; a[o + 2] = s.colA.b; a[o + 3] = s.glow;
     a = arr.aColB; a[o] = s.colB.r; a[o + 1] = s.colB.g; a[o + 2] = s.colB.b; a[o + 3] = s.grow;
@@ -349,6 +363,7 @@ export function createBits(game, { capacity = 2048 } = {}) {
     const death = t0 + s.life;
     if (death > lastDeath) lastDeath = death;
     s.delay = 0;
+    s.seed = -1;
   }
 
   function flush() {

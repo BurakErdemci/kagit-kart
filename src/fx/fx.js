@@ -165,7 +165,7 @@ export function createFX(game) {
   // ---------------------------------------------------------------------------------------------
   // emitters
 
-  function spark(k, wheelPos, tier, big) {
+  function spark(k, wheelPos, tier, big, grow = 1) {
     const d = k.drift.dir || (k.hop.dir || 1);
     const s = baseSpec(wheelPos.x + R(-0.05, 0.05), wheelPos.y + R(0, 0.06), wheelPos.z + R(-0.05, 0.05), k, big ? 0.72 : 0.62);
     const back = big ? R(3, 7) : R(2, 5);
@@ -178,11 +178,52 @@ export function createFX(game) {
     s.drag = 3; s.grav = 14; s.floor = groundOf(k) + 0.02;
     s.shape = SHAPE.TRI;
     s.size = tier > 0 ? R(0.06, 0.1) + tier * 0.01 : R(0.045, 0.07);
-    if (big) s.size *= 1.35;
+    if (big) s.size *= 1.35 * grow;
     s.spin = R(14, 26); s.fold = R(0.5, 1.2); s.aspect = 0.72;
     s.colA.copy(tierA[tier]); s.colB.copy(tierB[tier]);
     s.glow = tier > 0 ? 0.6 : 0.25;
     bits.emit(s);
+  }
+
+  // Tier-up: a cut-paper spark burst in the tier colour at a rear wheel (a pale core over the coloured
+  // zap over its hard offset shadow) with paper rays thrown out around it. The burst rides along with
+  // the kart for its short life so it stays at the wheel.
+  function tierBurst(k, w, tier, side) {
+    const cam = game.camera.matrixWorld.elements;
+    const x = w.x + _left.x * side * 0.12, y = w.y + 0.3, z = w.z + _left.z * side * 0.12;
+    const size = 0.34 + 0.06 * tier;
+    const seed = (time * 7.31 + k.index * 0.37 + (side > 0 ? 0 : 0.5)) % 1;
+    _col2.copy(tierA[tier]).multiplyScalar(0.35);
+    for (let i = 0; i < 3; i++) {
+      const sz = i === 2 ? size * 0.5 : size;
+      // layer 0 is the hard shadow, down-right of the zap in screen space
+      const off = i === 0 ? 0.1 * sz : 0;
+      const col = i === 0 ? _col2 : i === 1 ? tierA[tier] : tierB[tier];
+      const s = baseSpec(x + (cam[0] - cam[4]) * off, y + (cam[1] - cam[5]) * off, z + (cam[2] - cam[6]) * off, k, 1);
+      s.vy = k.vy || 0;
+      s.life = i === 2 ? 0.22 : 0.27; s.drag = 0; s.grav = 0; s.floor = -1e4;
+      s.shape = SHAPE.ZAP; s.mode = MODE.SPIN; s.spin = side * (i === 2 ? -3 : 2.5);
+      s.size = sz; s.aspect = 1; s.fold = 0;
+      s.colA.copy(col); s.colB.copy(col); s.glow = i === 0 ? 0.6 : i === 1 ? 0.85 : 1;
+      s.seed = seed;
+      bits.emit(s);
+    }
+    const n = Math.round(9 * Math.max(qMul, 0.75));
+    for (let i = 0; i < n; i++) {
+      // rays fan over the upper half, outward on this wheel's side
+      const a = (-0.25 + (i / (n - 1)) * 1.5) * Math.PI;
+      const sp = R(6.5, 9);
+      const out = Math.cos(a) * sp * side, up = Math.sin(a) * sp;
+      const s = baseSpec(x, y, z, k, 0.92);
+      s.vx += _left.x * out - _fh.x * R(0.5, 2);
+      s.vz += _left.z * out - _fh.z * R(0.5, 2);
+      s.vy = up + (k.vy || 0);
+      s.life = R(0.22, 0.3); s.drag = 5; s.grav = 5; s.floor = groundOf(k) + 0.02;
+      s.shape = SHAPE.SLIVER; s.mode = MODE.STREAK; s.spin = 0;
+      s.size = R(0.24, 0.32) + tier * 0.03; s.aspect = 0.2; s.fold = 0;
+      s.colA.copy(tierA[tier]); s.colB.copy(tierA[tier]); s.glow = 0.75;
+      bits.emit(s);
+    }
   }
 
   // A rooster tail from each rear wheel, thrown outward on its own side (+1 left wheel, -1 right).
@@ -395,7 +436,9 @@ export function createFX(game) {
           const tier = Math.max(1, Math.min(3, r.a | 0));
           const n = Math.round((14 + tier * 2) * Math.max(qMul, 0.75));
           anchor(k, 'wheelRL', _a); anchor(k, 'wheelRR', _b);
-          for (let j = 0; j < n; j++) spark(k, j % 2 ? _a : _b, tier, true);
+          for (let j = 0; j < n; j++) spark(k, j % 2 ? _a : _b, tier, true, 1.3);
+          tierBurst(k, _a, tier, 1);
+          tierBurst(k, _b, tier, -1);
           k.visual?.flash?.(TIER_A[tier], 0.08);
           break;
         }

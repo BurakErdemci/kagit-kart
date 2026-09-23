@@ -806,3 +806,11 @@ answers to it:
 - Rubber band (`config.rubberBand`): asymmetric — CPUs behind the player get help from 20 m (max 1.06, capped at 1.03 × the player's top speed); CPUs ahead are eased only beyond 40 m and never below 0.985.
 - Stat weights: speed 0.008, accel 0.12, `statGrip` 0.1 (handling also scales grip); roster stats differ per character, each sums to 15.
 - AI: skill = pace (throttle ceiling `lerp(0.94, 1, skill)`); autopilot uses the neutral style; rocket shortcuts chosen by simulating the crossing, none above 120 g.
+
+### 19.3 Look + core pass (23 Sep; binding over §9.2 / §12 / §14 where they differ)
+- Shadows: `PCFShadowMap` with radius 0; paper materials cut a single filtered tap at 50 % → hard edges without stair-steps. Curbs cast none; the void strip receives none.
+- Road print: per-chapter ink in `src/render/roadInk.js` (meadow warm grey-green, bosphorus light slate, glacier cool blue-grey, desk ruled notebook). A def overrides it with `theme.roadPrint`. New shared texture `fibre`. `surface()` gained params `c4`/`c5`/`v2` and shares `optsKey()` with `paper()` for caching.
+- `renderer.warmShadows(box, draw)` compiles every caster's depth program before the start; `compileAsync` runs with the post target bound. No program may compile after the start (tools/scenarios/fix2.mjs).
+- `track.waterSurface(edgeY)` honours `def.waterLevel`; the builder draws water at that height. `killY = deskY + 0.3`; `config.track.killDepth` is dead. While the camera target is below the page, the rig holds at `pageY + 1` and looks down.
+- `finish { kart, place, time, estimated }` fires for every kart; `estimated: true` for those classified by `finishNow()`/`conclude()`, emitted after `updatePlaces()`.
+- `query()` with a hint: when the hinted result lies beyond the offroad band, the grid lookup also runs and wins if nearer (shortcut crossings hand over to the far section).

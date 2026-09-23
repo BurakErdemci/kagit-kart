@@ -216,9 +216,11 @@ export class Parts {
     const len = Math.hypot(dx, dy, dz) || 1e-3;
     const g = new THREE.BoxGeometry(w, w, len);
     const gg = prepare(g, color);
-    // lookAt(eye, target, up) aims local +Z from target to eye.
+    // lookAt(eye, target, up) aims local +Z from target to eye. It writes only the rotation, so the
+    // shared matrix would keep the translation of whatever part was placed last.
     const up = Math.abs(dy) > 0.999 * len ? _p.set(1, 0, 0) : _p.set(0, 1, 0);
     _m.lookAt(_s.set(dx, dy, dz), new THREE.Vector3(), up);
+    _m.setPosition(0, 0, 0);
     gg.applyMatrix4(_m);
     gg.translate((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2);
     this.list.push(gg);

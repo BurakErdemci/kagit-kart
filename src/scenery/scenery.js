@@ -2,6 +2,7 @@
 // Builds the chapter's theme (themes/<id>.js), the pop-up field and the popup ramps. Only
 // game.materials makes surfaces; every geometry and unique material made here is disposed here.
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { createPopups } from './popup.js';
 import { Parts, mulberry32, hashString, mixHex, roundRectPts } from './kit.js';
 import * as lettering from '../ui/lettering.js';
@@ -14,6 +15,7 @@ const THEMES = { meadow, bosphorus, glacier, desk };
 const CELL = 24;
 const SIGN_W = 20, SIGN_H = 8, SIGN_POST = 4;
 const REACH = 70; // clearance search radius; farther than this from any road counts as open page
+const VOID_W = 60; // the cut's width past the band (trackBuilder VOID_W): nothing stands over it
 
 export function createScenery(game, def, track) {
   const s = track.samples;
@@ -44,6 +46,37 @@ export function createScenery(game, def, track) {
   }
   const hxOf = (i) => (s.hx ? s.hx[i] : s.rx[i]);
   const hzOf = (i) => (s.hz ? s.hz[i] : s.rz[i]);
+
+  // Samples with a void edge, bucketed like the rest: a prop standing over the cut would float in
+  // front of a kart falling through it.
+  const voidBuckets = new Map();
+  for (let i = 0; i < N; i++) {
+    for (const [arr, sg] of [[s.edgeLeft, -1], [s.edgeRight, 1]]) {
+      if (!arr || arr[i] !== 2) continue;
+      const k = key(Math.floor(s.px[i] / CELL), Math.floor(s.pz[i] / CELL));
+      let list = voidBuckets.get(k);
+      if (!list) voidBuckets.set(k, list = []);
+      list.push(i, sg);
+    }
+  }
+  function overVoid(x, z, r = 0) {
+    if (!voidBuckets.size) return false;
+    const reach = Math.ceil((VOID_W + 30 + r) / CELL);
+    const cx = Math.floor(x / CELL), cz = Math.floor(z / CELL);
+    for (let dx = -reach; dx <= reach; dx++) for (let dz = -reach; dz <= reach; dz++) {
+      const list = voidBuckets.get(key(cx + dx, cz + dz));
+      if (!list) continue;
+      for (let k = 0; k < list.length; k += 2) {
+        const i = list[k], sg = list[k + 1];
+        const ox = x - s.px[i], oz = z - s.pz[i];
+        const hl = Math.hypot(s.tx[i], s.tz[i]) || 1;
+        if (Math.abs((ox * s.tx[i] + oz * s.tz[i]) / hl) > track.spacing + r) continue;
+        const lat = (ox * hxOf(i) + oz * hzOf(i)) * sg - s.halfWidth[i] - s.offroad[i];
+        if (lat > -1 - r && lat < VOID_W + 2 + r) return true;
+      }
+    }
+    return false;
+  }
 
   // Closest approach of (x, z) to any drivable band: distance past hw + offroad (negative inside).
   function bandGap(x, z, reach = REACH) {
@@ -115,7 +148,7 @@ export function createScenery(game, def, track) {
       const [rx, rz, rr] = reserved[k];
       if (Math.hypot(x - rx, z - rz) < rr + r) return false;
     }
-    return bandGap(x, z, REACH + r) >= r + margin && !inInfield(x, z);
+    return bandGap(x, z, REACH + r) >= r + margin && !inInfield(x, z) && !overVoid(x, z, r);
   }
 
   function alongTrack(x, z) {
@@ -261,7 +294,7 @@ export function createScenery(game, def, track) {
   const ctx = {
     THREE, game, def, track, theme: def.theme, decor: def.decor || {}, rng, pageY, group, L, N, samples: s,
     Parts, mixHex, mats, popups, scatter, cluster, flatsBesideRaised, addStatic, trackPoint, faceRoad, standingOK, bandGap,
-    inInfield, nearestIndex, alongTrack,
+    inInfield, nearestIndex, alongTrack, overVoid, VOID_W,
     onUpdate(fn) { updaters.push(fn); },
   };
 
@@ -336,18 +369,32 @@ export function createScenery(game, def, track) {
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = 4;
     ownTextures.push(tex);
-    const face = new THREE.PlaneGeometry(SIGN_W, SIGN_H);
-    face.translate(0, SIGN_POST + SIGN_H / 2, 0.2);
+    // The title is printed on both faces of a light card, so no side of the sign reads as a dark slab
+    // (at night the unprinted back went near-black).
+    const front = new THREE.PlaneGeometry(SIGN_W, SIGN_H);
+    front.translate(0, SIGN_POST + SIGN_H / 2, 0.2);
+    const rear = new THREE.PlaneGeometry(SIGN_W, SIGN_H);
+    rear.rotateY(Math.PI);
+    rear.translate(0, SIGN_POST + SIGN_H / 2, -0.2);
+    const face = mergeGeometries([front, rear], false);
+    front.dispose(); rear.dispose();
     // Up-facing normals light the title evenly whichever way the sun falls (as the backdrops).
     const fn = face.attributes.normal;
     for (let k = 0; k < fn.count; k++) fn.setXYZ(k, 0, 1, 0);
+    const stock = mixHex('#efe6d2', th.paper, 0.12);
+    const strut = mixHex(stock, th.ink, 0.16);
     const frame = new Parts()
-      .card(roundRectPts(SIGN_W + 0.9, SIGN_H + 0.9, 0.35), 0.3, mixHex(th.ink, th.paper, 0.25), '#fbf6e9', { y: SIGN_POST + SIGN_H / 2 })
-      .box(0.45, SIGN_POST + SIGN_H * 0.6, 0.45, mixHex(th.ink, th.paper, 0.35), { x: -SIGN_W * 0.33, z: -0.3 })
-      .box(0.45, SIGN_POST + SIGN_H * 0.6, 0.45, mixHex(th.ink, th.paper, 0.35), { x: SIGN_W * 0.33, z: -0.3 })
-      .build();
+      .card(roundRectPts(SIGN_W + 0.9, SIGN_H + 0.9, 0.35), 0.3, stock, '#fbf6e9', { y: SIGN_POST + SIGN_H / 2 })
+      .box(0.45, SIGN_POST + SIGN_H * 0.6, 0.45, strut, { x: -SIGN_W * 0.33, z: -0.3 })
+      .box(0.45, SIGN_POST + SIGN_H * 0.6, 0.45, strut, { x: SIGN_W * 0.33, z: -0.3 });
+    // Pop-up struts: triangular card gussets folded out behind the legs hold the sign up.
+    const gH = SIGN_POST + SIGN_H * 0.7, gD = 4.2;
+    for (const gx of [-SIGN_W * 0.33, SIGN_W * 0.33]) {
+      frame.card([[0.5, 0], [gD, 0], [0.5, gH]], 0.14, strut, '#fbf6e9', { x: gx, ry: Math.PI / 2 });
+      frame.box(0.2, 0.06, gD, mixHex(strut, th.ink, 0.25), { x: gx, z: -gD / 2 - 0.3 });
+    }
     const type = popups.addType('chapterSign', [
-      { geometry: frame, material: mats.paper, cast: true },
+      { geometry: frame.build(), material: mats.paper, cast: true },
       { geometry: face, material: uniquePaper('#ffffff', { map: tex, halftone: false }) },
     ]);
     const y = ctx.startGroundY ?? pageY;

@@ -138,14 +138,14 @@ export function build(ctx) {
       if (standingOK(x, z, 11)) popups.add(bunting, x, p.y - 0.05, z, Math.atan2(p.x - x, p.z - z) + Math.PI / 2 * 0, 1, 1, 1, { s: p.s - 40, size: 9 });
     }
   }
-  // Crags under the cliff ridge (void side, right) stand on the page below.
+  // Crags across the cut below the cliff ridge (void side, right), on the page past its far rim.
   if (decor.ridge) {
     const [a, b] = decor.ridge;
     for (let k = 0; k < 9; k++) {
       const p = trackPoint(t0(a + (t0(b - a) * k) / 9), 0);
-      const lat = p.band + 6 + rng() * 14;
-      const x = p.x + p.hx * lat, z = p.z + p.hz * lat;
       const sc = 1.5 + rng() * 1.8;
+      const lat = p.band + ctx.VOID_W + 4 + 3 * sc + rng() * 14;
+      const x = p.x + p.hx * lat, z = p.z + p.hz * lat;
       if (standingOK(x, z, 3 * sc)) popups.add(rock, x, pageY, z, rng() * 6.28, sc, sc * (1 + rng()), sc, { s: p.s });
     }
   }
@@ -165,7 +165,7 @@ export function build(ctx) {
       let x = a[0] + (b[0] - a[0]) * f, z = a[1] + (b[1] - a[1]) * f;
       const groundH = pageY;
       const top = groundH + 26 + f * 18;
-      if (bandGap(x, z, 60) < 4) { tops.push([x, top, z, false]); continue; }
+      if (bandGap(x, z, 60) < 4 || ctx.overVoid(x, z, 4)) { tops.push([x, top, z, false]); continue; }
       const yaw = Math.atan2(b[0] - a[0], b[1] - a[1]) + Math.PI / 2;
       const c = Math.cos(yaw), sn = Math.sin(yaw);
       const leg = (dx, y0, y1, w) => pylons.strip([x + c * dx * (1 - y0 / top), y0, z - sn * dx * (1 - y0 / top)], [x + c * dx * 0.3, y1, z - sn * dx * 0.3], w, '#6f6b80');

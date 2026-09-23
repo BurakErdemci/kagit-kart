@@ -1,8 +1,8 @@
 // Chapter 2 — Boğaz Gecesi. A paper İstanbul at blue hour: the strait printed in waves between
-// two shores, a suspension bridge whose side frames unfold with strings of lights on the
-// cables, a stone tower inside the climbing curl, wooden houses with lit windows, lantern
-// strings, ferries crossing with smoke, a simit cart, gulls, and a moon hung on a string in
-// front of layered cut-paper domes and minarets.
+// two shores, a red paper-cut suspension bridge strung with lamps, a stone tower inside the
+// climbing curl, wooden houses with lit windows, lantern strings, ferries crossing with smoke, a
+// simit cart, gulls, a moon hung on a string, and a composed skyline of three mosques over rows
+// of lit houses.
 import { circlePts, blobPts, archPts, roundRectPts, starPts } from '../kit.js';
 
 const EDGE = '#f1e6cf';
@@ -38,6 +38,8 @@ export function build(ctx) {
     addStatic(new THREE.Mesh(g, waterMat)).receiveShadow = true;
     // Moonlight glitter: a column of pale dashes across the water toward the moon.
   }
+
+  const ground = new Parts(); // flat prints on the page and the water, drawn as one mesh
 
   // ---------------------------------------------------------------- prop types
   const house = (w, h, d, bay) => {
@@ -138,7 +140,6 @@ export function build(ctx) {
     return x > west - 2 && x < east + 2 ? null : [x, z];   // never in the strait
   };
   const tints = ['#f3d9b1', '#e8b6a6', '#b9cfe0', '#f1e5c8', '#cfe0c4', '#e9c7d9'];
-  let placedHouses = 0;
   for (let d = 0; d < L; d += 12) {
     const p = trackPoint(d / L, 0);
     for (const sg of [-1, 1]) {
@@ -151,7 +152,6 @@ export function build(ctx) {
       popups.add(wide ? wideHouse : tallHouse, at[0], pageY, at[1], ctx.faceRoad(at[0], at[1], p.i, 10), sc, sc, sc, {
         tint: tints[Math.floor(rng() * tints.length)], s: p.s,
       });
-      placedHouses++;
     }
   }
   for (let d = 5; d < L; d += 9) {
@@ -222,52 +222,168 @@ export function build(ctx) {
     popups.add(tower, tx, pageY, tz, Math.atan2(pc.x - tx, pc.z - tz), 1, 1, 1, { s: pc.s, size: 40 });
   }
 
-  // ---------------------------------------------------------------- suspension bridge side frames
-  if (decor.bridge) {
+  // ---------------------------------------------------------------- the suspension bridge
+  // The chapter's signature frame, standing for good like the skyline: red paper-cut towers whose
+  // pointed-arch portals the road runs through, a cream tulip on each crown, cream main cables
+  // strung with lamps, hangers down to a railing that stands clear of the drivable edge (the strait
+  // shows through the gap), a deck with a body under it, and the lamps' light printed on the water.
+  // Built in the bridge's own frame: x along the deck from the middle of the water span, z to the
+  // right of travel, y up from the page.
+  if (decor.bridge && hasStrait) {
     const [a, b] = decor.bridge;
-    // deck points over the water
-    let first = null, last = null;
-    for (let k = 0; k <= 200; k++) {
-      const p = trackPoint(t0(a + (t0(b - a) * k) / 200), 0);
-      if (p.x > west && p.x < east) { if (!first) first = p; last = p; }
-    }
-    if (first && last) {
-      const deckY = Math.max(first.y, last.y);
-      const span = Math.hypot(last.x - first.x, last.z - first.z);
-      const len = span + 70;
-      const pm = trackPoint(t0((first.i + last.i) / 2 / N), 0);
-      const D = deckY - pageY;
-      const H = D + 30, T = span / 2 - 6;
-      const frame = new Parts();
-      const bulbs = new Parts();
-      for (const x of [-T, T]) {
-        frame.box(2.2, H, 2.2, '#d7d2c6', { x });
-        for (const yb of [D - 1.5, D + 12, D + 24, H - 1.2]) frame.box(3.4, 1.2, 2.6, '#bfb8a8', { x, y: yb });
-        bulbs.box(0.9, 0.9, 0.9, '#ffffff', { x, y: H + 0.2 });
-      }
-      // main cable: anchors on land, over the tower tops, sagging to the deck middle
-      const cable = (x) => {
-        if (x < -T) return D + 1 + ((x + len / 2) / (len / 2 - T)) * (H - D - 1);
-        if (x > T) return D + 1 + ((len / 2 - x) / (len / 2 - T)) * (H - D - 1);
-        const f = x / T;
-        return D + 3 + (H - D - 3) * f * f;
+    const run = [];
+    for (let k = 0; k <= 240; k++) run.push(trackPoint(t0(a + (t0(b - a) * k) / 240), 0));
+    const wet = run.filter((p) => p.x > west && p.x < east);
+    if (wet.length > 2) {
+      const first = wet[0], last = wet[wet.length - 1];
+      const ox = (first.x + last.x) / 2, oz = (first.z + last.z) / 2;
+      const span = Math.hypot(last.x - first.x, last.z - first.z) || 1;
+      const ux = (last.x - first.x) / span, uz = (last.z - first.z) / span;
+      const prof = run.map((p) => [(p.x - ox) * ux + (p.z - oz) * uz, p.y - pageY]).sort((p, q) => p[0] - q[0]);
+      const deckAt = (x) => {
+        if (x <= prof[0][0]) return prof[0][1];
+        for (let k = 1; k < prof.length; k++) {
+          if (prof[k][0] < x) continue;
+          const [x0, y0] = prof[k - 1], [x1, y1] = prof[k];
+          return y0 + ((y1 - y0) * (x - x0)) / Math.max(1e-6, x1 - x0);
+        }
+        return prof[prof.length - 1][1];
       };
-      const steps = 44;
-      for (let k = 0; k < steps; k++) {
-        const x0 = -len / 2 + (len * k) / steps, x1 = -len / 2 + (len * (k + 1)) / steps;
-        // The cables are the bridge's night signature: lit strips, not grey wire.
-        bulbs.strip([x0, cable(x0), 0], [x1, cable(x1), 0], 1.1, '#ffffff');
+      const B = first.band;
+      const D = deckAt(0);
+      const xT = span / 2 - 9;              // towers stand in the water just off each shore
+      const Zl = B + 3.4;                   // legs, cables and railing, clear of the drivable band
+      const H = D + 44;                     // tower top
+      const xA = [Math.max(prof[0][0] + 4, -xT - 44), Math.min(prof[prof.length - 1][0] - 4, xT + 44)];
+      const sag = D + 2.4, saddle = H - 1.2;
+      const cableY = (x) => {
+        if (Math.abs(x) <= xT) return sag + (saddle - sag) * (x / xT) ** 2;
+        const xa = x < 0 ? xA[0] : xA[1];
+        const f = (Math.abs(x) - xT) / (Math.abs(xa) - xT);
+        return saddle + (deckAt(xa) + 1.2 - saddle) * f - 2.2 * Math.sin(Math.PI * f);
+      };
+      const RED = '#c8413b', RED_DARK = '#9e2f2c', CREAM = '#f4e6c4', STONE = '#d7ccb2';
+      const f = new Parts();
+      const lamps = new Parts();
+      const legR = (y) => 3.9 + ((2.6 - 3.9) * y) / H;   // square leg, circumradius at height y
+      // A portal beam across the deck (card plane across x): top at y1, a Tudor arch cut under it
+      // rising `rise` from y0 between the legs; the red card shows its cream core on every cut.
+      const portal = (y0, y1, rise, crest) => {
+        const zi = Zl - legR(y0) * 0.72;
+        const pts = [];
+        if (crest) {
+          const n = Math.round((2 * Zl + 2) / 2.6);
+          for (let k = 0; k <= n; k++) pts.push([Zl + 1 - ((2 * Zl + 2) * k) / n, y1 + (k % 2 ? 1.5 : 0)]);
+        } else {
+          pts.push([Zl + 1, y1], [-Zl - 1, y1]);
+        }
+        pts.push([-Zl - 1, y0], [-zi, y0]);
+        const g = (u) => 0.55 * Math.sqrt(1 - (1 - u) ** 2) + 0.45 * u;
+        for (let k = 1; k <= 12; k++) pts.push([-zi + (zi * k) / 12, y0 + rise * g(k / 12)]);
+        for (let k = 11; k >= 0; k--) pts.push([zi - (zi * k) / 12, y0 + rise * g(k / 12)]);
+        pts.push([Zl + 1, y0]);
+        return pts;
+      };
+      for (const x of [-xT, xT]) {
+        for (const z of [-Zl, Zl]) {
+          f.box(8.6, 3.4, 8.6, STONE, { x, z });
+          f.box(9.4, 0.5, 9.4, CREAM, { x, y: 3.4, z });
+          f.cyl(legR(H), legR(0), H, RED, { x, z, ry: Math.PI / 4 }, 4);
+          for (const yb of [D - 0.8, D + 12.6, D + 27.2]) {
+            const r = legR(yb) + 0.25;
+            f.cyl(r, r, 1.1, CREAM, { x, y: yb, z, ry: Math.PI / 4 }, 4);
+          }
+          f.cyl(legR(H) + 0.35, legR(H) + 0.35, 0.6, CREAM, { x, y: H - 0.6, z, ry: Math.PI / 4 }, 4);
+          lamps.box(1.5, 2.1, 1.5, '#ffffff', { x, y: H, z });
+          f.cyl(0.15, 1.35, 1.8, RED_DARK, { x, y: H + 2.1, z, ry: Math.PI / 4 }, 4);
+        }
+        f.card(portal(D + 13.4, D + 18.8, 3.4, false), 2.6, RED, CREAM, { x, ry: -Math.PI / 2 });
+        f.card(portal(D + 28, D + 31.4, 1.7, false), 2.6, RED, CREAM, { x, ry: -Math.PI / 2 });
+        f.card(portal(D + 40.4, H + 0.2, 1.1, true), 2.6, RED, CREAM, { x, ry: -Math.PI / 2 });
+        f.card(TULIP.map(([u, v]) => [u * 3.6, D + 40.9 + v * 3.3]), 3.1, CREAM, RED, { x, ry: -Math.PI / 2 });
       }
-      for (let x = -T + 5; x < T; x += 6) bulbs.strip([x, cable(x) - 0.4, 0], [x, D, 0], 0.3, '#ffffff');
-      frame.box(len, 1.1, 0.8, '#bfb8a8', { y: D - 1.2 });
-      const side = popups.addType('kopru', [
-        { geometry: frame.build(), material: P, cast: true },
-        { geometry: bulbs.build(), material: E('#ffe9a8') },
-      ], { tab: false, flutter: false, noChunk: true });
+      // main cables with their lamps, one per side, anchor to anchor over both saddles
+      const step = 2.4;
+      for (const z of [-Zl, Zl]) {
+        let px = xA[0], py = cableY(px), k = 0;
+        for (let x = xA[0] + step; x <= xA[1] + 1e-6; x += step, k++) {
+          const y = cableY(x);
+          f.strip([px, py, z], [x, y, z], 1.25, CREAM);
+          if (k % 2 === 0) lamps.box(0.75, 0.75, 0.75, '#ffffff', { x, y: y + 0.55, z });
+          px = x; py = y;
+        }
+        f.box(3.2, 2.6, 3.2, RED_DARK, { x: xA[0], y: deckAt(xA[0]) - 0.6, z });
+        f.box(3.2, 2.6, 3.2, RED_DARK, { x: xA[1], y: deckAt(xA[1]) - 0.6, z });
+      }
+      // hangers, outrigger brackets, railing posts (a lamp on every other one) and the rails
+      const posts = [];
+      for (let x = Math.ceil(xA[0] / 5) * 5; x <= xA[1]; x += 5) {
+        if (Math.abs(Math.abs(x) - xT) < 3) continue;
+        posts.push(x);
+      }
+      posts.forEach((x, k) => {
+        const dy = deckAt(x);
+        for (const sg of [-1, 1]) {
+          const z = sg * Zl;
+          const cy = cableY(x);
+          if (cy - dy > 1.6) f.strip([x, cy - 0.5, z], [x, dy + 1.0, z], 0.24, CREAM);
+          f.box(0.5, 0.45, Zl - B - 0.3, RED, { x, y: dy - 0.95, z: sg * (B + 0.6 + (Zl - B - 0.3) / 2) });
+          f.box(0.24, 1.55, 0.24, CREAM, { x, y: dy - 0.5, z });
+          if (k % 2 === 0) lamps.box(0.42, 0.42, 0.42, '#ffffff', { x, y: dy + 1.05, z });
+          const n = posts[k + 1];
+          if (n != null && n - x < 6) {
+            const dn = deckAt(n);
+            f.strip([x, dy + 1.0, z], [n, dn + 1.0, z], 0.16, CREAM);
+            f.strip([x, dy + 0.45, z], [n, dn + 0.45, z], 0.1, CREAM);
+          }
+        }
+      });
+      // the deck's body under the road, a cream stripe along its side
+      for (let x0 = xA[0] - 3; x0 < xA[1] + 3; x0 += 4) {
+        const x1 = Math.min(x0 + 4, xA[1] + 3);
+        const y0 = deckAt(x0), y1 = deckAt(x1), xm = (x0 + x1) / 2, ym = (y0 + y1) / 2;
+        const rz = Math.atan2(y1 - y0, x1 - x0);
+        f.box(x1 - x0 + 0.05, 2.3, 2 * (B + 0.6), RED, { x: xm, y: ym - 2.65, rz });
+        f.box(x1 - x0 + 0.05, 0.55, 2 * (B + 0.75), CREAM, { x: xm, y: ym - 1.35, rz });
+      }
+      const frame = new THREE.Mesh(f.build(), P);
+      const glow = new THREE.Mesh(lamps.build(), E('#ffe9a8'));
+      for (const m of [frame, glow]) {
+        m.position.set(ox, pageY, oz);
+        m.rotation.y = Math.atan2(-uz, ux);
+        addStatic(m);
+      }
+      frame.name = 'scenery:bridge';
+      frame.castShadow = true;
+      frame.receiveShadow = true;
+      // the lamps' light printed on the water under the span, broken by the waves
+      const rxv = -uz, rzv = ux;
+      const toWorld = (x, z) => [ox + ux * x + rxv * z, oz + uz * x + rzv * z];
+      const across = Math.atan2(-rzv, rxv), along = Math.atan2(-uz, ux);
+      const half = span / 2;
       for (const sg of [-1, 1]) {
-        const off = pm.band + 1.5;
-        const x = pm.x + pm.hx * sg * off, z = pm.z + pm.hz * sg * off;
-        popups.add(side, x, pageY, z, Math.atan2(pm.x - x, pm.z - z), 1, 1, 1, { s: first.s, size: 30 });
+        for (let x = -xT - 6; x <= xT + 6; x += 2.4) {
+          for (let j = 0; j < 3; j++) {
+            if (rng() < 0.35) continue;
+            const off = sg * (Zl + (j - 1) * 3.2 + (rng() - 0.5) * 2);
+            const [wx, wz] = toWorld(x + (rng() - 0.5) * 1.2, off);
+            ground.flat(roundRectPts(1.4 + rng() * 2.6, 0.45, 0.2, 2), mixHex(waterColor, '#ffe2a0', 0.45 + rng() * 0.3), { x: wx, y: pageY + 0.1, z: wz, ry: across });
+          }
+        }
+      }
+      // lights of both shores on the open strait either side of the span, streaked towards the deck
+      for (let k = 0; k < 170; k++) {
+        const sg = k % 2 ? 1 : -1;
+        const lat = sg * (Zl + 8 + 125 * rng() ** 1.4);
+        const x = -half + 3 + (2 * half - 6) * rng();
+        const [wx, wz] = toWorld(x, lat);
+        ground.flat(roundRectPts(2.2 + rng() * 4.5, 0.4 + rng() * 0.3, 0.18, 2), mixHex(waterColor, rng() < 0.7 ? '#ffd98a' : '#dfe6ff', 0.35 + rng() * 0.3), { x: wx, y: pageY + 0.09, z: wz, ry: along });
+      }
+      for (const x of [-xT, xT]) for (const sg of [-1, 1]) {
+        for (let k = 0; k < 5; k++) {
+          const [wx, wz] = toWorld(x + (rng() - 0.5) * 2, sg * (Zl + 7 + k * 4.2));
+          ground.flat(roundRectPts(3 + rng() * 3, 0.55, 0.25, 2), mixHex(waterColor, '#ffe9a8', 0.7 - k * 0.08), { x: wx, y: pageY + 0.1, z: wz, ry: across });
+        }
       }
     }
   }
@@ -342,34 +458,97 @@ export function build(ctx) {
   }
   addStatic(stars); addStatic(starStrings);
 
-  // ---------------------------------------------------------------- skyline flats (stay up)
-  const back = new Parts();
-  const backLit = new Parts();
-  const layers = [
-    { r: 0, col: '#2c3868', h: 1.0 },
-    { r: 110, col: '#3a4679', h: 1.25 },
-    { r: 230, col: '#4b568a', h: 1.5 },
-  ];
-  const ringR = rad + 170;
-  for (const [li, ly] of layers.entries()) {
-    const n = 20 + li * 6;
-    for (let k = 0; k < n; k++) {
-      const a = (k / n) * Math.PI * 2 + li * 0.21;
-      let rr = ringR + ly.r;
-      while (bandGap(cx + Math.cos(a) * rr, cz + Math.sin(a) * rr, 300) < 170 + ly.r) rr += 20;
-      const x = cx + Math.cos(a) * rr, z = cz + Math.sin(a) * rr;
-      const yaw = Math.atan2(cx - x, cz - z);
-      const k2 = rng();
-      if (k2 < 0.45) mosque(back, x, z, yaw, ly, pageY, rng);
-      else houses(back, backLit, x, z, yaw, ly, pageY, rng);
+  // ---------------------------------------------------------------- skyline (stays up)
+  // Composed, not repeated, in two sectors. North, where the grid, the start straight and the old
+  // town look: the grand mosque (four minarets, a tulip mahya between the tall pair) above the road's
+  // vanishing point and wooden houses with lit windows along both banks, the stone tower in the curl
+  // standing in front of it. South, down the strait past the low bridge, where the quay and the
+  // intro's title shot look: a waterfront mosque (two minarets) at the bridge's end and a hilltop
+  // mosque (one) across the water over rows of houses. Elsewhere only lit houses on the eastern hill
+  // and a low band of hills. Nearer layers print darker.
+  {
+    const sky = new Parts();
+    const skyLit = new Parts();
+    const bnd = ctx.track.bounds, pm = ctx.game.config.track.pageMargin;
+    const page = { x0: bnd.min.x - pm + 14, x1: bnd.max.x + pm - 14, z0: bnd.min.z - pm + 14, z1: bnd.max.z + pm - 14 };
+    const layer = (col) => ({ p: sky, lit: skyLit, col, edge: mixHex(col, '#9aa3d6', 0.3), at: null });
+    const facing = (sil, x, z, vx, vz, lift = 0) => { sil.at = { x, y: pageY + lift, z, ry: Math.atan2(vx - x, vz - z) }; return sil; };
+    const sp = trackPoint(t0(ctx.track.startT ?? 0), 0);
+    const fx = Math.sin(sp.heading), fz = Math.cos(sp.heading);
+    // (ahead, right) metres from the start line → world
+    const fromStart = (ahead, right) => [sp.x + fx * ahead + sp.hx * right, sp.z + fz * ahead + sp.hz * right];
+    const NEAR = '#1e2651', MID = '#28335f', FAR = '#34406e', RING = '#3d4979';
+
+    // a long hill card with a rolling crest, `w` wide, rising to about `h` in the middle
+    const hillCard = (sil, w, h) => {
+      const pts = [];
+      for (let k = 0; k <= 24; k++) {
+        const u = k / 24;
+        pts.push([-w / 2 + w * u, 4 + h * Math.sin(Math.PI * u) ** 1.5 + 2.5 * Math.sin(u * 17)]);
+      }
+      pts.push([w / 2, 0], [-w / 2, 0]);
+      cutOut(sil, pts, -2, 1.5);
+    };
+
+    // north, above the start straight and the old town: the old city
+    const [gx, gz] = fromStart(322, -10);
+    grandMosque(facing(layer(MID), gx, gz, sp.x, sp.z));
+    const row = (sil, a, b, opts) => houseRow(sil, fromStart(...a), fromStart(...b), [sp.x, sp.z], rng, { y: pageY, ...opts });
+    row(layer(NEAR), [262, -300], [256, -14], { lift: (d) => 3 + 9 * Math.sin((d / 290) * Math.PI), lit: 0.34 });
+    if (hasStrait) row(layer(NEAR), [258, (east - sp.x) + 6], [262, 420], { lift: (d) => 2 + 7 * Math.sin((d / 260) * Math.PI * 0.8), lit: 0.34 });
+    row(layer(FAR), [352, -60], [352, 190], { lift: (d) => 6 + 5 * Math.sin(d / 40), scale: 0.8, lit: 0.22 });
+
+    // south, down the strait past the low bridge (the quay and the intro's title shot look this way):
+    // the waterfront mosque at the low bridge's western end, a hilltop mosque on the far shore
+    if (hasStrait && decor.lowBridge) {
+      const lb = trackPoint(mid(...decor.lowBridge), 0);
+      const dn = Math.sign(lb.z - cz) || 1;
+      const vx = quayP.x, vz = quayP.z;
+      waterfrontMosque(facing(layer(MID), west - 55, lb.z + 120 * dn, vx, vz));
+      const hill = facing(layer(FAR), east + 90, lb.z + 190 * dn, vx, vz);
+      hillCard(hill, 260, 15);
+      hilltopMosque(facing(layer(MID), east + 90, lb.z + 186 * dn, vx, vz, 15));
+      const toV = [vx, vz];
+      houseRow(layer(NEAR), [west - 290, lb.z + 95 * dn], [west - 8, lb.z + 80 * dn], toV, rng, { y: pageY, lift: (d) => 2 + 8 * Math.sin((d / 280) * Math.PI), lit: 0.36 });
+      houseRow(layer(NEAR), [east + 8, lb.z + 80 * dn], [east + 300, lb.z + 100 * dn], toV, rng, { y: pageY, lift: (d) => 2 + 6 * Math.sin((d / 290) * Math.PI), lit: 0.36 });
+      houseRow(layer(FAR), [west + 6, lb.z + 222 * dn], [east + 70, lb.z + 222 * dn], toV, rng, { y: pageY, lift: (d) => 5 + 4 * Math.sin(d / 35), scale: 0.8, lit: 0.22 });
     }
+
+    // east, through the bridge portals: the Asian shore, a hill of lit houses (no landmark)
+    if (decor.bridge) {
+      const bm = trackPoint(mid(...decor.bridge), 0);
+      const bfx = Math.sin(bm.heading), bfz = Math.cos(bm.heading);
+      const at = (ahead, right) => [bm.x + bfx * ahead + bm.hx * right, bm.z + bfz * ahead + bm.hz * right];
+      const [hx, hz] = at(392, 14);
+      hillCard(facing(layer(FAR), hx, hz, bm.x, bm.z), 300, 16);
+      houseRow(layer(NEAR), at(334, -160), at(334, 180), [bm.x, bm.z], rng, { y: pageY, lift: (d) => 2 + 9 * Math.sin((d / 340) * Math.PI) ** 2, scale: 0.85, lit: 0.36 });
+    }
+
+    // round the rest: low hills with a few distant lights, inside the page
+    const c0x = (bnd.min.x + bnd.max.x) / 2, c0z = (bnd.min.z + bnd.max.z) / 2;
+    const HILLS = 30;
+    for (let k = 0; k < HILLS; k++) {
+      const a = (k / HILLS) * Math.PI * 2 + (rng() - 0.5) * 0.08;
+      const dx = Math.cos(a), dz = Math.sin(a);
+      const tx = dx > 0 ? (page.x1 - c0x) / dx : dx < 0 ? (page.x0 - c0x) / dx : Infinity;
+      const tz = dz > 0 ? (page.z1 - c0z) / dz : dz < 0 ? (page.z0 - c0z) / dz : Infinity;
+      const r = Math.min(tx, tz);
+      const sil = facing(layer(RING), c0x + dx * r, c0z + dz * r, c0x, c0z);
+      const w = 120 + rng() * 70, h = 14 + rng() * 16;
+      cutOut(sil, archPts(w, h, 16), 0, 1.5);
+      for (let j = 0; j < 4; j++) {
+        if (rng() < 0.4) continue;
+        const u = (rng() - 0.5) * 0.7;
+        light(sil, u * w, Math.sqrt(Math.max(0, 1 - 4 * u * u)) * h * 0.72, 0.9, 0.9, 1);
+      }
+    }
+    const skyGeo = sky.build();
+    const skyline = addStatic(new THREE.Mesh(skyGeo, mats.evenLight(skyGeo)));
+    skyline.name = 'scenery:skyline';
+    addStatic(new THREE.Mesh(skyLit.build(), E('#f7c56a')));
   }
-  const backGeo = back.build();
-  addStatic(new THREE.Mesh(backGeo, mats.evenLight(backGeo)));
-  addStatic(new THREE.Mesh(backLit.build(), E('#f7c56a')));
 
   // ---------------------------------------------------------------- ground prints
-  const ground = new Parts();
   const gy = pageY + 0.04;
   for (let k = 0; k < 70; k++) {
     const x = minX - 200 + rng() * (maxX - minX + 400), z = minZ - 200 + rng() * (maxZ - minZ + 400);
@@ -423,42 +602,163 @@ export function build(ctx) {
     }
     puffs.instanceMatrix.needsUpdate = true;
   });
-  void placedHouses;
 }
 
-// Cut-paper mosque: base, central dome, half domes and two to four minarets.
-function mosque(p, x, z, yaw, ly, pageY, rng) {
-  const s = ly.h * (0.9 + rng() * 0.4);
-  const col = ly.col;
-  const put = (pts, dx, t = 1) => p.card(pts, t, col, col, { x: x + Math.cos(yaw) * dx, y: pageY, z: z - Math.sin(yaw) * dx, ry: yaw });
-  put([[-26 * s, 0], [26 * s, 0], [26 * s, 12 * s], [-26 * s, 12 * s]], 0);
-  put(archPts(30 * s, 20 * s, 16).map(([a, b]) => [a, b + 12 * s]), 0);
-  put(archPts(14 * s, 9 * s, 10).map(([a, b]) => [a - 17 * s, b + 12 * s]), 0);
-  put(archPts(14 * s, 9 * s, 10).map(([a, b]) => [a + 17 * s, b + 12 * s]), 0);
-  put([[-0.8 * s, 32 * s], [0.8 * s, 32 * s], [0, 38 * s]], 0);
-  const mins = rng() < 0.5 ? [-30, 30] : [-34, -26, 26, 34];
-  for (const m of mins) {
-    const h = (44 + rng() * 8) * s;
-    put([[m * s - 1.2 * s, 0], [m * s + 1.2 * s, 0], [m * s + 1.2 * s, h], [m * s, h + 7 * s], [m * s - 1.2 * s, h]], 0);
-    put([[m * s - 2 * s, h * 0.72], [m * s + 2 * s, h * 0.72], [m * s + 2 * s, h * 0.72 + 1.2 * s], [m * s - 2 * s, h * 0.72 + 1.2 * s]], 0);
+// ------------------------------------------------------------------ skyline cut-outs
+// A cut-out's local frame: x along the card, y up from its foot, +z towards the viewer; `sil.at`
+// { x, y, z, ry } places it. Silhouettes go to `sil.p` in one colour, lit windows to `sil.lit`.
+
+// A tulip, the chapter's emblem: base point at (0, 0), about 0.92 tall.
+const TULIP = [[0, 0], [-0.34, 0.12], [-0.46, 0.42], [-0.42, 0.8], [-0.24, 0.62], [-0.12, 0.92], [0, 0.68],
+  [0.12, 0.92], [0.24, 0.62], [0.42, 0.8], [0.46, 0.42], [0.34, 0.12]];
+const rect = (x, y, w, h) => [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+const domePts = (cx, y0, w, h, n = 14) => archPts(w, h, n, cx).map(([x, y]) => [x, y + y0]);
+
+function cutOut(sil, pts, dz = 0, t = 1.2) {
+  const { at } = sil;
+  sil.p.card(pts, t, sil.col, sil.edge, { x: at.x + Math.sin(at.ry) * dz, y: at.y, z: at.z + Math.cos(at.ry) * dz, ry: at.ry });
+}
+
+function light(sil, lx, ly, w, h, dz = 1) {
+  const { at } = sil, c = Math.cos(at.ry), s = Math.sin(at.ry);
+  sil.lit.box(w, h, 0.4, '#ffffff', { x: at.x + c * lx + s * dz, y: at.y + ly, z: at.z - s * lx + c * dz, ry: at.ry });
+}
+
+// Pencil minaret: pedestal, tapering shaft, balconies (fractions of the shaft) each with a ring of
+// lamps, a conical cap and a finial.
+function minaret(sil, x0, h, balconies, dz) {
+  cutOut(sil, rect(x0 - 3.2, 0, 6.4, 9), dz);
+  cutOut(sil, [[x0 - 1.7, 9], [x0 + 1.7, 9], [x0 + 1.35, h], [x0 - 1.35, h]], dz);
+  for (const f of balconies) {
+    const y = 9 + (h - 9) * f;
+    cutOut(sil, [[x0 - 1.5, y - 2.4], [x0 + 1.5, y - 2.4], [x0 + 3, y], [x0 + 3, y + 1.2], [x0 - 3, y + 1.2], [x0 - 3, y]], dz);
+    light(sil, x0, y + 1.3, 4.8, 0.8, dz + 0.9);
   }
+  cutOut(sil, [[x0 - 1.8, h], [x0 + 1.8, h], [x0, h + 16]], dz);
+  cutOut(sil, rect(x0 - 0.3, h + 15.5, 0.6, 4.5), dz);
 }
 
-// A row of hillside houses with a few lit windows.
-function houses(p, lit, x, z, yaw, ly, pageY, rng) {
-  const s = ly.h;
-  let dx = -40 * s;
-  while (dx < 40 * s) {
-    const w = (7 + rng() * 6) * s, h = (10 + rng() * 14) * s;
-    const put = (pts, parts, col, lift = 0) => parts.card(pts, 1, col, col, { x: x + Math.cos(yaw) * (dx + w / 2), y: pageY + lift, z: z - Math.sin(yaw) * (dx + w / 2), ry: yaw });
-    put([[-w / 2, 0], [w / 2, 0], [w / 2, h], [0, h + 4 * s], [-w / 2, h]], p, ly.col);
-    for (let k = 0; k < 3; k++) {
-      if (rng() < 0.55) continue;
-      const wy = 3 * s + rng() * (h - 6 * s), wx = (rng() - 0.5) * (w - 3 * s);
-      lit.card([[wx - 0.9 * s, wy], [wx + 0.9 * s, wy], [wx + 0.9 * s, wy + 1.4 * s], [wx - 0.9 * s, wy + 1.4 * s]], 1.4, '#ffffff', '#ffffff', {
-        x: x + Math.cos(yaw) * (dx + w / 2) + Math.sin(yaw) * 0.6, y: pageY, z: z - Math.sin(yaw) * (dx + w / 2) + Math.cos(yaw) * 0.6, ry: yaw,
-      });
+// The grand mosque, symmetric: an arcade of small domes, the hall with corner domes, two half domes
+// stepping up to the drum and the great dome, turrets at the drum; the tall pair of minarets at the
+// hall, the short pair at the courtyard's corners, and a mahya between the tall pair.
+function grandMosque(sil) {
+  cutOut(sil, rect(-66, 0, 132, 13));
+  for (let k = -5; k <= 5; k++) cutOut(sil, domePts(k * 11.5, 13, 8.5, 4.6, 8), 0.05);
+  cutOut(sil, rect(-38, 0, 76, 30), 0.1);
+  for (const sx of [-1, 1]) {
+    cutOut(sil, domePts(sx * 31, 30, 13, 7, 10), 0.15);
+    cutOut(sil, domePts(sx * 17, 30, 30, 15, 14), 0.2);
+    cutOut(sil, rect(sx * 21 - 2.4, 30, 4.8, 18), 0.25);
+    cutOut(sil, [[sx * 21 - 2.4, 48], [sx * 21 + 2.4, 48], [sx * 21, 53]], 0.25);
+  }
+  cutOut(sil, rect(-18, 30, 36, 15), 0.3);
+  cutOut(sil, domePts(0, 44, 42, 23, 22), 0.35);
+  cutOut(sil, rect(-0.4, 66.5, 0.8, 7), 0.35);
+  for (let k = -3; k <= 3; k++) light(sil, k * 4.6, 36.5, 1.6, 3.4, 1.2);
+  for (let k = -4; k <= 4; k++) light(sil, k * 7.6, 17, 2, 4.2, 1.2);
+  minaret(sil, -46, 86, [0.58, 0.74, 0.88], 0.4);
+  minaret(sil, 46, 86, [0.58, 0.74, 0.88], 0.4);
+  minaret(sil, -72, 64, [0.62, 0.82], 0.4);
+  minaret(sil, 72, 64, [0.62, 0.82], 0.4);
+  // mahya: lamps strung between the tall minarets, a tulip drawn in lamps hanging from the middle
+  for (let k = 0; k <= 30; k++) {
+    const u = k / 30, x = -43 + 86 * u;
+    light(sil, x, 91 - 5 * Math.sin(Math.PI * u), 1.1, 1.1, 1.6);
+  }
+  const outline = [...TULIP, TULIP[0]];
+  for (let k = 0; k < outline.length - 1; k++) {
+    const [ax, ay] = outline[k], [bx, by] = outline[k + 1];
+    const n = Math.max(1, Math.round(Math.hypot(bx - ax, by - ay) / 0.11));
+    for (let j = 0; j < n; j++) {
+      const u = j / n;
+      light(sil, (ax + (bx - ax) * u) * 15, 74 + (ay + (by - ay) * u) * 13, 1.1, 1.1, 1.6);
     }
-    dx += w + rng() * 3 * s;
   }
+}
+
+// The waterfront mosque, asymmetric: a long courtyard wing of small domes with both minarets at its
+// far corners, the hall and its dome at the other end, and the sloping wall of a royal pavilion.
+function waterfrontMosque(sil) {
+  cutOut(sil, rect(-70, 0, 62, 12));
+  for (let k = 0; k < 6; k++) cutOut(sil, domePts(-63 + k * 10, 12, 7.5, 4.2, 8), 0.05);
+  cutOut(sil, rect(-12, 0, 56, 26), 0.1);
+  cutOut(sil, domePts(16, 26, 50, 12, 16), 0.15);
+  for (const x of [-7, 39]) cutOut(sil, domePts(x, 26, 10, 6, 8), 0.2);
+  cutOut(sil, rect(3, 26, 26, 9), 0.25);
+  cutOut(sil, domePts(16, 34, 30, 17, 18), 0.3);
+  cutOut(sil, rect(15.6, 50.5, 0.8, 6), 0.3);
+  cutOut(sil, [[44, 0], [64, 0], [64, 13], [54, 18], [44, 18]], 0.1);
+  for (let k = 0; k < 5; k++) light(sil, -4 + k * 8, 14, 2, 4, 1.2);
+  for (let k = -2; k <= 2; k++) light(sil, 16 + k * 4.8, 28.5, 1.4, 3, 1.2);
+  light(sil, 57, 5, 3, 4.5, 1.2);
+  minaret(sil, -70, 76, [0.6, 0.76, 0.9], 0.4);
+  minaret(sil, -52, 76, [0.6, 0.76, 0.9], 0.4);
+}
+
+// The hilltop mosque: a single great dome on a cube whose arched face is filled with lit windows,
+// a weight tower at each corner, and one minaret with a single balcony.
+function hilltopMosque(sil) {
+  cutOut(sil, rect(-32, 0, 64, 7));
+  cutOut(sil, rect(-24, 0, 48, 40), 0.1);
+  for (const sx of [-1, 1]) {
+    cutOut(sil, rect(sx * 25 - 3.4, 0, 6.8, 45), 0.15);
+    cutOut(sil, domePts(sx * 25, 45, 6.8, 4.6, 8), 0.15);
+  }
+  cutOut(sil, rect(-17, 40, 34, 6), 0.2);
+  cutOut(sil, domePts(0, 45, 40, 21, 22), 0.25);
+  cutOut(sil, rect(-0.4, 65.5, 0.8, 6), 0.25);
+  const rows = [[19, 7, 4.2], [25.5, 5, 4.2], [31.5, 3, 4.2]];
+  for (const [y, n, gap] of rows) for (let k = 0; k < n; k++) light(sil, (k - (n - 1) / 2) * gap, y, 2, 3.6, 1.2);
+  for (let k = -2; k <= 2; k++) light(sil, k * 7, 5, 2.2, 5, 1.2);
+  minaret(sil, 38, 78, [0.8], 0.3);
+}
+
+// A continuous row of wooden houses on a rolling bank from a to b (world [x, z]), facing `toward`:
+// gable, hipped, corniced and overhanging upper floors in a fixed cycle, heights from the seeded
+// stream, windows lit at `lit` odds, all standing on one long bank card.
+function houseRow(sil, a, b, toward, rnd, { lift = () => 0, scale = 1, lit = 0.3, y = 0 } = {}) {
+  const dx = b[0] - a[0], dz = b[1] - a[1];
+  const len = Math.hypot(dx, dz) || 1;
+  const sx = dx / len, sz = dz / len;
+  let nx = -sz, nz = sx;
+  if ((toward[0] - a[0]) * nx + (toward[1] - a[1]) * nz < 0) { nx = -nx; nz = -nz; }
+  const ry = Math.atan2(nx, nz);
+  // the card's local x runs along the row one way or the other
+  const sgn = Math.cos(ry) * sx - Math.sin(ry) * sz >= 0 ? 1 : -1;
+  const baseY = y;
+  const put = (d) => ({ x: a[0] + sx * d, y: baseY, z: a[1] + sz * d, ry });
+  const bank = [];
+  for (let k = 0; k <= 16; k++) {
+    const d = (len * k) / 16;
+    bank.push([(d - len / 2) * sgn, lift(d) + 1.2]);
+  }
+  bank.push([(len / 2) * sgn, 0], [(-len / 2) * sgn, 0]);
+  sil.at = put(len / 2);
+  cutOut(sil, bank, -0.6, 1.2);
+  let d = 0, k = 0;
+  while (d < len - 4) {
+    const w = Math.min(len - d, (7 + ((k * 5) % 7) + rnd() * 3) * scale);
+    const h = (10 + rnd() * 12 + (k % 3 === 1 ? 5 : 0)) * scale;
+    const kind = (k * 7 + (k >> 2)) % 4;
+    const hw = w / 2;
+    let pts;
+    if (kind === 0) pts = [[-hw, 0], [hw, 0], [hw, h], [0, h + w * 0.36], [-hw, h]];
+    else if (kind === 1) pts = [[-hw, 0], [hw, 0], [hw, h], [hw * 0.55, h + 2.8 * scale], [-hw * 0.55, h + 2.8 * scale], [-hw, h]];
+    else if (kind === 2) pts = [[-hw, 0], [hw, 0], [hw, h], [hw + 0.6, h], [hw + 0.6, h + 0.9], [-hw - 0.6, h + 0.9], [-hw - 0.6, h], [-hw, h]];
+    else pts = [[-hw, 0], [hw, 0], [hw, h * 0.45], [hw + 1, h * 0.5], [hw + 1, h], [0, h + w * 0.3], [-hw - 1, h], [-hw - 1, h * 0.5], [-hw, h * 0.45]];
+    const up = lift(d + hw);
+    sil.at = put(d + hw);
+    sil.at.y = baseY + up;
+    cutOut(sil, pts, 0, 1.2);
+    if (k % 5 === 2) cutOut(sil, rect(hw * 0.3, h, 1.2 * scale, (kind === 0 ? w * 0.36 : 2.8) + 1.6 * scale), -0.2, 1.2);
+    const rowsN = Math.max(1, Math.floor((h - 3 * scale) / (3.8 * scale)));
+    const colsN = Math.max(1, Math.floor(w / (3.4 * scale)));
+    for (let r = 0; r < rowsN; r++) for (let c = 0; c < colsN; c++) {
+      if (rnd() > lit) continue;
+      light(sil, (-hw + ((c + 0.5) * w) / colsN) * sgn, (2.4 + r * 3.8) * scale, 1.1 * scale, 1.6 * scale, 0.9);
+    }
+    d += w + (k % 4 === 3 ? 1.5 * scale : 0);
+    k++;
+  }
+  sil.at = null;
 }

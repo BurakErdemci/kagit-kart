@@ -1,5 +1,7 @@
 import meadow from './meadow.js';
+import bosphorus from './bosphorus.js';
+import glacier from './glacier.js';
+import desk from './desk.js';
 
-export const TRACKS = { meadow };
-// Only ids present in TRACKS; the tracks agent adds bosphorus, glacier, desk.
-export const CUP = ['meadow'];
+export const TRACKS = { meadow, bosphorus, glacier, desk };
+export const CUP = ['meadow', 'bosphorus', 'glacier', 'desk'];

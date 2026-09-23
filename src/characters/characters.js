@@ -1,124 +1,169 @@
-// CORE STUB — the characters agent replaces this folder but keeps ROSTER and createKartVisual.
-// Visual: box kart + sphere head, 3 draw calls. Local frame: origin at ground contact centre,
-// +Z forward, +Y up, +X is the kart's left.
+// Roster + kart visuals (ARCHITECTURE.md §10.7). One SkinnedMesh per kart+driver = one draw call
+// (+1 in the shadow pass). Per-character geometry and atlas texture are ref-counted so every
+// race teardown returns renderer.info.memory to its pre-setup value; the CPU-side build and the
+// painted canvas are kept for the next race.
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { paintAtlas } from './atlas.js';
+import { buildModel, atlasSpec } from './models.js';
+import { geometryFromArrays } from './paperkit.js';
+import { createPose } from './animate.js';
 
+// Stats are 1..5 summing to 15. Measured on the core as built (solo autopilot, 3 laps): one speed point is
+// worth ~4.4 s, the whole accel range ~0.45 s, the whole handling range ~0.2 s. Nothing else can pay for a
+// speed point, so speed is flat at 3 for every pick (bear at 4 was ~4 s ahead of the field); identity
+// lives in accel, handling, weight and offroad until config.kart re-weights the stats (CORE_REQUEST).
 export const ROSTER = [
-  { id: 'tilki', name: 'Fındık', animal: 'tilki', colors: { body: '#e8743b', accent: '#fbf6e9', kart: '#d9483b', detail: '#2d2a32' }, stats: { speed: 3, accel: 3, handling: 3, weight: 3, offroad: 3 }, voice: { pitch: 1.0 } },
-  { id: 'kurbaga', name: 'Vırak', animal: 'kurbağa', colors: { body: '#7cbf5a', accent: '#f2e27a', kart: '#3f8f5a', detail: '#2d2a32' }, stats: { speed: 2, accel: 4, handling: 4, weight: 2, offroad: 3 }, voice: { pitch: 1.25 } },
-  { id: 'penguen', name: 'Buzlu', animal: 'penguen', colors: { body: '#3b4252', accent: '#fbf6e9', kart: '#6c8ead', detail: '#f2a33a' }, stats: { speed: 3, accel: 2, handling: 4, weight: 3, offroad: 3 }, voice: { pitch: 1.1 } },
-  { id: 'ayi', name: 'Bal', animal: 'ayı', colors: { body: '#8a5a3b', accent: '#e8c89a', kart: '#b5651d', detail: '#2d2a32' }, stats: { speed: 4, accel: 2, handling: 2, weight: 5, offroad: 2 }, voice: { pitch: 0.75 } },
-  { id: 'kedi', name: 'Minnoş', animal: 'kedi', colors: { body: '#9aa0a8', accent: '#f6d6e0', kart: '#e56b6f', detail: '#2d2a32' }, stats: { speed: 3, accel: 4, handling: 3, weight: 2, offroad: 3 }, voice: { pitch: 1.3 } },
-  { id: 'baykus', name: 'Gece', animal: 'baykuş', colors: { body: '#7a6a8f', accent: '#f2c14e', kart: '#4a4e8f', detail: '#2d2a32' }, stats: { speed: 4, accel: 3, handling: 2, weight: 3, offroad: 3 }, voice: { pitch: 0.9 } },
-  { id: 'tavsan', name: 'Pıtır', animal: 'tavşan', colors: { body: '#f4efe6', accent: '#f2a7b8', kart: '#f2c14e', detail: '#2d2a32' }, stats: { speed: 2, accel: 5, handling: 3, weight: 1, offroad: 4 }, voice: { pitch: 1.4 } },
-  { id: 'ahtapot', name: 'Mürekkep', animal: 'ahtapot', colors: { body: '#c05a8f', accent: '#f6d6e0', kart: '#5a3f8f', detail: '#2d2a32' }, stats: { speed: 3, accel: 3, handling: 2, weight: 4, offroad: 3 }, voice: { pitch: 0.85 } },
+  { id: 'tilki', name: 'Tarçın', animal: 'tilki', colors: { body: '#e8792e', accent: '#fbf1df', kart: '#e8552b', detail: '#2e2b33' }, stats: { speed: 3, accel: 3, handling: 3, weight: 3, offroad: 3 }, voice: { pitch: 1.1 } },
+  { id: 'kurbaga', name: 'Nilüfer', animal: 'kurbağa', colors: { body: '#86cc45', accent: '#e9f2a6', kart: '#2f9a55', detail: '#f39ac0' }, stats: { speed: 3, accel: 3, handling: 3, weight: 2, offroad: 4 }, voice: { pitch: 0.92 } },
+  { id: 'penguen', name: 'Paytak', animal: 'penguen', colors: { body: '#2d3140', accent: '#fbfbf6', kart: '#3b82d9', detail: '#e2383f' }, stats: { speed: 3, accel: 3, handling: 2, weight: 4, offroad: 3 }, voice: { pitch: 1.18 } },
+  { id: 'ayi', name: 'Pofuduk', animal: 'ayı', colors: { body: '#8b5a34', accent: '#e7c396', kart: '#f4bd2e', detail: '#c4622d' }, stats: { speed: 3, accel: 1, handling: 3, weight: 5, offroad: 3 }, voice: { pitch: 0.72 } },
+  { id: 'kedi', name: 'Kömür', animal: 'kedi', colors: { body: '#2c2a33', accent: '#f5d33f', kart: '#d02f3f', detail: '#27a2b8' }, stats: { speed: 3, accel: 4, handling: 5, weight: 1, offroad: 2 }, voice: { pitch: 1.26 } },
+  { id: 'baykus', name: 'Pervane', animal: 'baykuş', colors: { body: '#b3814a', accent: '#f1dfb8', kart: '#4a3d93', detail: '#d4a13d' }, stats: { speed: 3, accel: 3, handling: 4, weight: 2, offroad: 3 }, voice: { pitch: 0.95 } },
+  { id: 'tavsan', name: 'Havuç', animal: 'tavşan', colors: { body: '#f5f1e8', accent: '#f3a3be', kart: '#ee6aa7', detail: '#f08a2e' }, stats: { speed: 3, accel: 5, handling: 4, weight: 1, offroad: 2 }, voice: { pitch: 1.36 } },
+  { id: 'ahtapot', name: 'Mürekkep', animal: 'ahtapot', colors: { body: '#8e4cc2', accent: '#e2c2f5', kart: '#1fb5b0', detail: '#f5d547' }, stats: { speed: 3, accel: 2, handling: 4, weight: 4, offroad: 2 }, voice: { pitch: 0.85 } },
 ];
 
-function colored(geo, color) {
-  const c = new THREE.Color(color);
-  const n = geo.attributes.position.count;
-  const arr = new Float32Array(n * 3);
-  for (let i = 0; i < n; i++) { arr[i * 3] = c.r; arr[i * 3 + 1] = c.g; arr[i * 3 + 2] = c.b; }
-  geo.setAttribute('color', new THREE.BufferAttribute(arr, 3));
-  return geo;
+const BY_ID = Object.fromEntries(ROSTER.map((c) => [c.id, c]));
+// Tracing-paper wash for the time-trial ghost: lifts the print toward a cool white.
+const GHOST_GLOW = new THREE.Color('#5d7fb8').multiplyScalar(0.55);
+const built = new Map(); // id → { atlas, model, inverses, sphere }   (CPU only, kept)
+const gpu = new Map(); // id → { refs, geometry, texture }             (ref-counted)
+
+function resolve(character) {
+  if (typeof character === 'string') return BY_ID[character] || ROSTER[0];
+  if (character && BY_ID[character.id]) return { ...BY_ID[character.id], ...character, colors: { ...BY_ID[character.id].colors, ...(character.colors || {}) } };
+  return ROSTER[0];
 }
 
-export function createKartVisual(game, character, kart, opts = {}) {
-  const ghost = !!opts.ghost;
-  const mats = game.materials;
-  const col = character.colors;
+function buildFor(ch) {
+  let b = built.get(ch.id);
+  if (b) return b;
+  const atlas = paintAtlas(atlasSpec(ch), 'kk:' + ch.id);
+  const model = buildModel(ch, atlas);
+  const inverses = model.bones.map((d) => new THREE.Matrix4().makeTranslation(-d.pivot[0], -d.pivot[1], -d.pivot[2]));
+  const g = geometryFromArrays(model.arrays);
+  const sphere = g.boundingSphere.clone();
+  sphere.radius = sphere.radius * 1.25 + 0.4; // streamers, tumble arcs and squash stay inside
+  g.dispose();
+  b = { atlas, model, inverses, sphere };
+  built.set(ch.id, b);
+  return b;
+}
 
-  const parts = [
-    colored(new THREE.BoxGeometry(1.5, 0.42, 2.2).translate(0, 0.52, 0), col.kart),
-    colored(new THREE.BoxGeometry(1.2, 0.22, 0.5).translate(0, 0.82, 0.95), col.accent), // nose
-    colored(new THREE.BoxGeometry(1.1, 0.55, 0.18).translate(0, 1.0, -0.55), col.kart), // seat back
-    colored(new THREE.CylinderGeometry(0.34, 0.4, 0.62, 8).translate(0, 1.04, -0.2), col.body), // torso
-    colored(new THREE.BoxGeometry(1.6, 0.1, 0.36).translate(0, 0.95, -1.05), col.accent), // wing
-  ];
-  const bodyGeo = mergeGeometries(parts);
-  parts.forEach((g) => g.dispose());
-  const wheelBase = new THREE.CylinderGeometry(0.3, 0.3, 0.34, 10).rotateZ(Math.PI / 2);
-  const wheels = [];
-  for (const [x, z] of [[0.78, 0.72], [-0.78, 0.72], [0.8, -0.74], [-0.8, -0.74]]) wheels.push(wheelBase.clone().translate(x, 0.3, z));
-  const wheelGeo = mergeGeometries(wheels);
-  wheelBase.dispose();
-  wheels.forEach((g) => g.dispose());
-  const headGeo = colored(new THREE.SphereGeometry(0.4, 12, 8).translate(0, 1.55, -0.15), col.body);
-  const earA = colored(new THREE.ConeGeometry(0.13, 0.3, 5).translate(0.2, 1.95, -0.15), col.body);
-  const earB = colored(new THREE.ConeGeometry(0.13, 0.3, 5).translate(-0.2, 1.95, -0.15), col.body);
-  const snout = colored(new THREE.SphereGeometry(0.16, 8, 6).translate(0, 1.5, 0.22), col.accent);
-  const headAll = mergeGeometries([headGeo, earA, earB, snout]);
-  [headGeo, earA, earB, snout].forEach((g) => g.dispose());
+function acquire(game, ch, b) {
+  let a = gpu.get(ch.id);
+  if (!a) {
+    const texture = new THREE.CanvasTexture(b.atlas.canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = Math.min(8, game.renderer.capabilities.getMaxAnisotropy());
+    texture.name = 'kart.atlas.' + ch.id;
+    const geometry = geometryFromArrays(b.model.arrays);
+    geometry.name = 'kart.' + ch.id;
+    a = { refs: 0, geometry, texture };
+    gpu.set(ch.id, a);
+  }
+  a.refs++;
+  return a;
+}
 
-  const unique = [];
-  let bodyMat, wheelMat, headMat;
-  if (ghost) {
-    const o = { unique: true, vertexColors: true, transparent: true, opacity: 0.42, depthWrite: false, halftone: false };
-    bodyMat = mats.paper('#ffffff', o);
-    headMat = bodyMat;
-    wheelMat = mats.paper(col.detail, { unique: true, transparent: true, opacity: 0.42, depthWrite: false, halftone: false });
-    unique.push(bodyMat, wheelMat);
-  } else {
-    bodyMat = mats.paper('#ffffff', { vertexColors: true });
-    headMat = bodyMat;
-    wheelMat = mats.paper(col.detail);
+function release(id) {
+  const a = gpu.get(id);
+  if (!a) return;
+  if (--a.refs > 0) return;
+  a.geometry.dispose();
+  a.texture.dispose();
+  gpu.delete(id);
+}
+
+// Unique per visual: flash() and the foil shimmer write its emissive; disposed with the visual.
+function makeMaterial(game, texture, ghost) {
+  const paper = game.materials.paper;
+  return ghost
+    ? paper('#d5e4ff', { map: texture, unique: true, flat: true, halftone: false, transparent: true, opacity: 0.42, depthWrite: true })
+    : paper(0xffffff, { map: texture, unique: true, flat: true, halftone: true });
+}
+
+export function createKartVisual(game, character, kart = null, opts = {}) {
+  const ch = resolve(character);
+  const ghost = !!(opts && opts.ghost);
+  const b = buildFor(ch);
+  const res = acquire(game, ch, b);
+  const model = b.model;
+
+  const material = makeMaterial(game, res.texture, ghost);
+  const mesh = new THREE.SkinnedMesh(res.geometry, material);
+  mesh.name = 'kart.body';
+  const bones = model.bones.map((d) => { const bone = new THREE.Bone(); bone.name = d.name; return bone; });
+  model.bones.forEach((d, i) => {
+    const pp = d.parent >= 0 ? model.bones[d.parent].pivot : [0, 0, 0];
+    bones[i].position.set(d.pivot[0] - pp[0], d.pivot[1] - pp[1], d.pivot[2] - pp[2]);
+    if (d.parent >= 0) bones[d.parent].add(bones[i]);
+  });
+  mesh.add(bones[0]);
+  const skeleton = new THREE.Skeleton(bones, b.inverses.map((m) => m.clone()));
+  mesh.bind(skeleton, new THREE.Matrix4());
+  mesh.boundingSphere = b.sphere.clone();
+  mesh.castShadow = !ghost;
+  mesh.receiveShadow = false;
+
+  const anchors = {};
+  for (const [name, a] of Object.entries(model.anchors)) {
+    const o = new THREE.Object3D();
+    o.name = 'anchor.' + name;
+    const pv = model.bones[a.bone].pivot;
+    o.position.set(a.pos[0] - pv[0], a.pos[1] - pv[1], a.pos[2] - pv[2]);
+    bones[a.bone].add(o);
+    anchors[name] = o;
   }
 
   const object3d = new THREE.Group();
-  object3d.name = `kart:${character.id}${ghost ? ':ghost' : ''}`;
-  const rig = new THREE.Group(); // animated child (spin, lean, squash)
+  object3d.name = 'kart:' + ch.id + (ghost ? ':ghost' : '');
+  const rig = new THREE.Group();
+  rig.name = 'kart.rig';
   object3d.add(rig);
-  const body = new THREE.Mesh(bodyGeo, bodyMat);
-  const wheelsMesh = new THREE.Mesh(wheelGeo, wheelMat);
-  const head = new THREE.Mesh(headAll, headMat);
-  // Karts cast but do not receive: at 2048 texels over 110 m a hard shadow edge on small kart parts shows texel teeth.
-  for (const m of [body, wheelsMesh, head]) { m.castShadow = !ghost; m.receiveShadow = false; rig.add(m); }
+  rig.add(mesh);
 
-  const anchors = {
-    wheelRL: new THREE.Object3D(), wheelRR: new THREE.Object3D(), exhaust: new THREE.Object3D(), head: new THREE.Object3D(),
-  };
-  anchors.wheelRL.position.set(0.8, 0.3, -0.74);
-  anchors.wheelRR.position.set(-0.8, 0.3, -0.74);
-  anchors.exhaust.position.set(0, 0.5, -1.1);
-  anchors.head.position.set(0, 1.55, -0.15);
-  for (const a of Object.values(anchors)) rig.add(a);
+  const seed = ROSTER.findIndex((c) => c.id === ch.id) + (kart ? kart.index * 0.37 : 0) + (ghost ? 0.5 : 0);
+  const pose = createPose(model, bones, rig, mesh, object3d, ghost ? GHOST_GLOW : null, seed);
+  const classes = game.config.classes;
+  const env = { ghost, reducedMotion: false, topSpeed: 25, spins: game.config.kart.spins };
 
-  let emotion = 'idle';
-  let t = 0;
-  let spin = 0;
-  let flashT = 0;
+  const offs = [];
+  if (kart) {
+    for (const name of ['trick', 'bump', 'wallHit']) {
+      offs.push(game.events.on(name, (e) => {
+        if (e.kart === kart || e.a === kart || e.b === kart) pose.onEvent(name, e);
+      }));
+    }
+  }
 
-  return {
+  let disposed = false;
+  const visual = {
     object3d,
     anchors,
+    character: ch,
+    kart,
+    ghost,
     update(frameDt) {
-      t += frameDt;
-      if (kart) {
-        if (kart.spinTime > 0) spin += frameDt * 14;
-        else spin = 0;
-        rig.rotation.y = spin;
-        rig.rotation.z = kart.drift.active ? kart.drift.dir * 0.08 : 0;
-        const blink = kart.graceTime > 0 && kart.spinTime <= 0 && Math.floor(t * 16) % 2 === 0;
-        rig.visible = !blink;
-        rig.position.y = kart.hop.active ? 0.05 : 0;
-      } else {
-        rig.rotation.y = emotion === 'dizzy' ? t * 6 : 0;
-        rig.position.y = emotion === 'cheer' ? Math.abs(Math.sin(t * 6)) * 0.3 : Math.sin(t * 2) * 0.03;
-      }
-      if (flashT > 0) {
-        flashT -= frameDt;
-        rig.scale.setScalar(1 + Math.max(0, flashT) * 0.6);
-      } else rig.scale.setScalar(1);
+      if (disposed) return;
+      env.reducedMotion = !!game.reducedMotion;
+      env.topSpeed = kart ? kart.baseTop : (classes[game.cls] || classes[120]).top;
+      pose.update(frameDt || 0, kart, env);
     },
-    setEmotion(name) { emotion = name; },
-    flash(color, duration = 0.08) { flashT = duration; },
+    setEmotion(name) { pose.setEmotion(name); },
+    flash(color, duration) { pose.flash(color, duration); },
     dispose() {
-      bodyGeo.dispose();
-      wheelGeo.dispose();
-      headAll.dispose();
-      unique.forEach((m) => m.dispose());
-      object3d.parent?.remove(object3d);
+      if (disposed) return;
+      disposed = true;
+      for (const off of offs) off();
+      offs.length = 0;
+      rig.remove(mesh);
+      object3d.remove(rig);
+      skeleton.dispose();
+      material.dispose();
+      release(ch.id);
     },
   };
+  pose.update(0, kart, env);
+  return visual;
 }

@@ -150,6 +150,93 @@ export function createTextures(renderer) {
     g.fillRect(36, 0, 10, 64);
   });
 
+  // Card rail print, one panel per repeat (u = along, v = height; canvas top is v = 1): a top rail, a lower
+  // rail and the fold crease at the panel's edge.
+  const railC = maskCanvas(64, 64, (g) => {
+    g.fillRect(0, 5, 64, 7);
+    g.fillRect(0, 38, 64, 5);
+    g.fillRect(0, 0, 3, 64);
+    for (const y of [8.5, 40.5]) { g.beginPath(); g.arc(32, y, 2.2, 0, Math.PI * 2); g.fillStyle = '#000'; g.fill(); g.fillStyle = '#fff'; }
+  });
+
+  // Stacked page edges: one line per sheet, uneven weight (u = along the edge, 2 m; v = height, 8 m).
+  const stackC = maskCanvas(64, 256, (g, w, h) => {
+    let y = 1;
+    while (y < h - 1) {
+      g.globalAlpha = 0.35 + rand() * 0.65;
+      const t = 0.6 + rand() * 1.1;
+      g.beginPath();
+      g.moveTo(0, y);
+      g.bezierCurveTo(w * 0.33, y + (rand() - 0.5) * 1.2, w * 0.66, y + (rand() - 0.5) * 1.2, w, y);
+      g.lineWidth = t;
+      g.stroke();
+      y += 2.2 + rand() * 2.4;
+    }
+    g.globalAlpha = 1;
+  });
+
+  // Printed wood grain for the desk: long wavering lines that part around a few knots.
+  const woodC = maskCanvas(512, 512, (g, w, h) => {
+    const knots = [];
+    for (let k = 0; k < 4; k++) knots.push({ x: rand() * w, y: 40 + rand() * (h - 80), r: 8 + rand() * 14 });
+    g.lineCap = 'round';
+    for (let y0 = 3; y0 < h; y0 += 5 + rand() * 9) {
+      const ph = rand() * 6.28, amp = 1 + rand() * 3, fr = (1 + Math.floor(rand() * 3)) * Math.PI * 2 / w;
+      g.globalAlpha = 0.3 + rand() * 0.7;
+      g.lineWidth = 0.8 + rand() * 1.6;
+      g.beginPath();
+      for (let x = 0; x <= w; x += 4) {
+        let y = y0 + Math.sin(x * fr + ph) * amp;
+        for (const kn of knots) {
+          const dx = x - kn.x, dy = y - kn.y, d2 = dx * dx + dy * dy;
+          y += Math.sign(dy || 1) * (kn.r * kn.r * 1.6) / (Math.sqrt(d2) + kn.r) * Math.exp(-d2 / (kn.r * kn.r * 16));
+        }
+        if (x === 0) g.moveTo(x, y); else g.lineTo(x, y);
+      }
+      g.stroke();
+    }
+    g.globalAlpha = 0.8;
+    for (const kn of knots) {
+      for (let r = kn.r * 0.3; r < kn.r * 1.1; r += 3.5) {
+        g.lineWidth = 1.2;
+        g.beginPath(); g.ellipse(kn.x, kn.y, r * 1.7, r * 0.6, 0, 0, Math.PI * 2); g.stroke();
+      }
+    }
+    g.globalAlpha = 1;
+  });
+
+  // Ramp sticker plates (clamped; the 1 px border stays empty so off-sticker UVs print nothing):
+  // R = chevrons, G = die-cut sticker paper, B = its hard offset shadow. u = across, v = up the ramp.
+  const rampC = canvas(256, 256);
+  {
+    const g = rampC.getContext('2d');
+    g.fillStyle = '#000';
+    g.fillRect(0, 0, 256, 256);
+    const rr = (x, y, w, h, r) => {
+      g.beginPath();
+      g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+      g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+    };
+    g.fillStyle = '#0000ff';
+    rr(60, 30, 148, 196, 22); g.fill();
+    g.globalCompositeOperation = 'lighter';
+    g.fillStyle = '#00ff00';
+    rr(52, 38, 148, 196, 22); g.fill();
+    g.globalCompositeOperation = 'source-over';
+    // chevrons pointing up the ramp: flipY maps the canvas top to v = 1 (the lip)
+    g.strokeStyle = '#ffff00';
+    g.lineWidth = 17;
+    g.lineJoin = 'miter';
+    for (const cy of [80, 128, 176]) {
+      g.beginPath();
+      g.moveTo(80, cy + 22); g.lineTo(126, cy - 14); g.lineTo(172, cy + 22);
+      g.stroke();
+    }
+    // chevrons sit on the sticker: keep G under them so R wins, and clear the 1 px border
+    g.fillStyle = '#000';
+    g.fillRect(0, 0, 256, 1); g.fillRect(0, 255, 256, 1); g.fillRect(0, 0, 1, 256); g.fillRect(255, 0, 1, 256);
+  }
+
   const textures = {
     grain: tex(grainC, { aniso }),
     dots: tex(dotsC),
@@ -161,6 +248,10 @@ export function createTextures(renderer) {
     grid: tex(gridC, { aniso }),
     waves: tex(wavesC, { aniso }),
     fence: tex(fenceC, { aniso }),
+    stack: tex(stackC, { aniso }),
+    rail: tex(railC, { aniso }),
+    wood: tex(woodC, { aniso }),
+    rampSticker: tex(rampC, { aniso, repeat: false }),
   };
   return textures;
 }

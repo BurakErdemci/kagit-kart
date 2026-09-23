@@ -13,22 +13,30 @@ void main() {
   gl_Position.z = gl_Position.w * 0.99999;
 }`;
 
+// A painted paper backdrop: a two-tone wash laid in hard-edged brush bands whose edges wander around
+// the horizon, with brush streaks and paper fibre. No sun disc: scenery hangs its own cut-paper sun/moon.
 const SKY_FRAG = /* glsl */`
 uniform vec3 uTop;
 uniform vec3 uBottom;
-uniform vec3 uSunDir;
-uniform vec3 uSunColor;
-uniform vec3 uInk;
+uniform sampler2D uGrain;
+uniform float uBands;
 varying vec3 vDir;
 void main() {
   vec3 d = normalize( vDir );
+  float az = atan( d.z, d.x ) / 6.2831853 + 0.5;
   float h = clamp( d.y * 1.4 + 0.02, 0.0, 1.0 );
-  vec3 col = mix( uBottom, uTop, smoothstep( 0.0, 1.0, sqrt( h ) ) );
-  float s = dot( d, normalize( uSunDir ) );
-  float disc = smoothstep( 0.99935, 0.9995, s );
-  float ring = smoothstep( 0.99905, 0.9992, s ) - disc;
-  col = mix( col, uSunColor, disc );
-  col = mix( col, uInk, ring * 0.85 );
+  float t = smoothstep( 0.0, 1.0, sqrt( h ) );
+  float wob = 0.02 * sin( az * 18.85 + 1.3 ) + 0.013 * sin( az * 43.98 + 0.4 ) + 0.007 * sin( az * 106.8 + 2.1 );
+  float tb = clamp( t + wob * ( 1.0 - t ), 0.0, 0.9999 ) * uBands;
+  float bi = floor( tb ), bf = fract( tb );
+  float up = smoothstep( 1.0 - max( fwidth( tb ), 1e-4 ), 1.0, bf );
+  float tq = ( bi + up + 0.25 + 0.5 * bf * ( 1.0 - up ) ) / uBands;
+  vec3 col = mix( uBottom, uTop, clamp( tq, 0.0, 1.0 ) );
+  col *= 1.0 - 0.05 * ( 1.0 - smoothstep( 0.0, 0.07, bf ) ) * step( 0.5, bi );
+  // lod 0: the azimuth wraps from 1 to 0 behind the viewer, and a derivative-picked mip would draw a seam
+  float streak = textureLod( uGrain, vec2( az * 5.0, d.y * 26.0 ), 0.0 ).r;
+  float fibre = textureLod( uGrain, vec2( az * 24.0, d.y * 20.0 ), 0.0 ).r;
+  col *= 1.0 + ( streak - 0.92 ) * 0.5 + ( fibre - 0.92 ) * 0.35;
   gl_FragColor = vec4( col, 1.0 );
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -79,8 +87,7 @@ export function createRenderer(game, container) {
   const skyMat = new THREE.ShaderMaterial({
     uniforms: {
       uTop: { value: new THREE.Color() }, uBottom: { value: new THREE.Color() },
-      uSunDir: { value: new THREE.Vector3(0, 1, 0) }, uSunColor: { value: new THREE.Color() },
-      uInk: { value: new THREE.Color() },
+      uGrain: { value: null }, uBands: { value: 7 },
     },
     vertexShader: SKY_VERT, fragmentShader: SKY_FRAG,
     side: THREE.BackSide, depthWrite: false, fog: false,
@@ -108,10 +115,9 @@ export function createRenderer(game, container) {
     scene.fog.far = t.fog.far;
     skyMat.uniforms.uTop.value.set(t.skyTop);
     skyMat.uniforms.uBottom.value.set(t.skyBottom);
-    skyMat.uniforms.uSunColor.value.set(t.sun.color).lerp(new THREE.Color('#fff8e8'), 0.5);
-    skyMat.uniforms.uInk.value.set(t.ink);
+    // materials are created after the renderer; the first themed call after that hands over the grain
+    if (!skyMat.uniforms.uGrain.value && game.materials) skyMat.uniforms.uGrain.value = game.materials.textures.grain;
     sunDir.set(...t.sun.dir).normalize();
-    skyMat.uniforms.uSunDir.value.copy(sunDir);
     sun.color.set(t.sun.color);
     sun.intensity = t.sun.intensity;
     ambient.color.set(t.ambient.color);

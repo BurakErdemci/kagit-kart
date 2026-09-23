@@ -1,126 +1,264 @@
-// CORE STUB — the UI agent replaces this folder but keeps createUI(game) → { update(frameDt), dispose() }.
-// Plain DOM: title button, HUD (place, lap, time), countdown, pause card, results. Calls game.api only.
-// Core opens the pause menu (Esc/P/Start); closing it is UI's job via api.setPaused(false).
-import { config } from '../core/config.js';
+// DOM overlay for every screen and the HUD (ARCHITECTURE.md §10.4). Changes game flow only through
+// game.api.*, reads menu presses from game.input.nav and writes game.input.touch.
+import { ROSTER } from '../characters/characters.js';
+import { TRACKS, CUP } from '../track/defs/index.js';
+import { h, fmtTime } from './dom.js';
+import { buildCSS } from './style.js';
+import { createMenus, createIntroCard } from './menus.js';
+import { createHUD } from './hud.js';
+import { createPause, createResults, createPodium } from './panels.js';
+import { createTouch } from './touch.js';
+import { createHints } from './hints.js';
 
-const F = config.fonts.body;
-const CSS = `
-#kk-ui { position: absolute; inset: 0; pointer-events: none; font-family: ${F}; font-weight: 700; color: #2d2a32; }
-#kk-ui .card { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); background: #fbf6e9;
-  border: 2px solid #2d2a32; box-shadow: 6px 6px 0 #2d2a32; padding: 22px 30px; text-align: center; pointer-events: auto; }
-#kk-ui h1 { margin: 0 0 12px; font: 800 44px ${F}; letter-spacing: .5px; }
-#kk-ui button { font: 800 20px ${F}; color: #2d2a32; background: #f2c14e; border: 2px solid #2d2a32;
-  box-shadow: 3px 3px 0 #2d2a32; padding: 6px 22px; margin: 4px; cursor: pointer; }
-#kk-ui button:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 #2d2a32; }
-#kk-ui .hud { position: absolute; top: calc(12px + env(safe-area-inset-top)); left: calc(14px + env(safe-area-inset-left));
-  right: calc(14px + env(safe-area-inset-right)); display: flex; justify-content: space-between; font: 800 26px ${F};
-  text-shadow: 2px 2px 0 #fbf6e9; }
-#kk-ui .hud span { background: #fbf6e9cc; border: 2px solid #2d2a32; padding: 0 12px; }
-#kk-ui .big { position: absolute; left: 50%; top: 38%; transform: translate(-50%, -50%); font: 800 96px ${F};
-  color: #fbf6e9; -webkit-text-stroke: 3px #2d2a32; text-shadow: 5px 5px 0 #2d2a32; }
-#kk-ui table { border-collapse: collapse; margin: 6px auto 12px; font-size: 16px; }
-#kk-ui td { padding: 2px 10px; text-align: left; }
-`;
-
-function fmt(t) {
-  if (t == null || !isFinite(t)) return '–:––.––';
-  const m = Math.floor(t / 60);
-  const s = t - m * 60;
-  return `${m}:${s < 10 ? '0' : ''}${s.toFixed(2)}`;
-}
+const GLYPHS = {
+  keyboard: { confirm: 'Enter', back: 'Esc', drift: 'Space', item: 'X', brake: '↓', pause: 'Esc' },
+  gamepad: { confirm: 'A', back: 'B', drift: 'RB', item: 'X', brake: 'B', pause: 'Start' },
+  touch: { confirm: null, back: null, drift: 'DRIFT', item: 'EŞYA', brake: 'FREN', pause: '❚❚' },
+};
+const NO_NAV = { up: false, down: false, left: false, right: false, confirm: false, back: false, pause: false };
 
 export function createUI(game) {
+  const offs = [];
   const style = document.createElement('style');
-  style.textContent = CSS;
+  style.id = 'kk-ui-style';
+  style.textContent = buildCSS(game.config?.fonts?.body);
   document.head.appendChild(style);
-  const root = document.createElement('div');
-  root.id = 'kk-ui';
-  root.innerHTML = `
-    <div class="card" data-s="title"><h1>Kâğıt Kart</h1><button data-a="start">Yarışa başla</button></div>
-    <div class="hud" data-s="hud" hidden><span data-f="place"></span><span data-f="lap"></span><span data-f="time"></span></div>
-    <div class="big" data-s="count" hidden></div>
-    <div class="card" data-s="pause" hidden><h1>Duraklatıldı</h1><button data-a="resume">Devam</button><button data-a="menu">Menüye dön</button></div>
-    <div class="card" data-s="results" hidden><h1>Sonuçlar</h1><table data-f="table"></table>
-      <button data-a="again">Tekrar yarış</button><button data-a="next" hidden>Sonraki yarış</button><button data-a="menu">Menüye dön</button></div>`;
-  (document.getElementById('kk-root') || document.body).appendChild(root);
-  const $ = (sel) => root.querySelector(sel);
-  const screens = { title: $('[data-s=title]'), hud: $('[data-s=hud]'), count: $('[data-s=count]'), pause: $('[data-s=pause]'), results: $('[data-s=results]') };
-  const f = { place: $('[data-f=place]'), lap: $('[data-f=lap]'), time: $('[data-f=time]'), table: $('[data-f=table]') };
-  const nextBtn = $('[data-a=next]');
 
-  const start = () => game.api.startRace({});
-  const actions = {
-    start,
-    resume: () => game.api.setPaused(false),
-    again: () => game.api.restartRace(),
-    next: () => game.api.nextRace(),
-    menu: () => game.api.quitToTitle(),
-  };
-  function onClick(e) {
-    const a = e.target.closest('button')?.dataset.a;
-    if (a && actions[a]) { e.preventDefault(); actions[a](); }
-  }
-  root.addEventListener('click', onClick);
+  const host = document.getElementById('kk-root') || document.body;
+  const root = h('div', { class: 'kk-ui', lang: 'tr' });
+  host.appendChild(root);
 
-  let goFlash = 0;
-  let lastCount = null;
-  let resultsShown = null;
+  let prevStandings = null;
+  // Core starts input.device at 'keyboard'; on a touch device that is only true once a key or pad press arrives.
+  let sawNav = false;
 
-  function show(name, on) {
-    const el = screens[name];
-    if (el.hidden === on) el.hidden = !on;
-  }
-
-  function update(frameDt) {
-    const phase = game.phase;
-    const nav = game.input.nav;
-    show('title', phase === 'title' || phase === 'menu');
-    if ((phase === 'title' || phase === 'menu') && nav.confirm) start();
-
-    const racing = phase === 'countdown' || phase === 'race' || phase === 'finishing';
-    show('hud', racing);
-    const p = game.player;
-    if (racing && p && game.race) {
-      f.place.textContent = `${p.place}/${game.karts.length}`;
-      f.lap.textContent = `Tur ${Math.min(Math.max(p.lap, 1), game.race.laps)}/${game.race.laps}`;
-      f.time.textContent = fmt(game.raceTime);
-    }
-
-    const race = game.race;
-    let big = '';
-    if (phase === 'countdown' && race && race.countdown > 0) big = String(race.countdown);
-    if (race && race.countdown === 0 && lastCount !== 0) goFlash = 0.9;
-    lastCount = race ? race.countdown : null;
-    if (goFlash > 0) { goFlash -= frameDt; if (phase === 'race') big = 'BAŞLA!'; }
-    if (phase === 'finishing') big = 'BİTİŞ!';
-    show('count', !!big);
-    if (big && screens.count.textContent !== big) screens.count.textContent = big;
-
-    show('pause', game.paused);
-    if (game.paused && (nav.pause || nav.back)) actions.resume();
-
-    const inResults = phase === 'results' && race && race.results;
-    show('results', !!inResults);
-    if (inResults && resultsShown !== race.results) {
-      resultsShown = race.results;
-      f.table.innerHTML = race.results.map((r) => {
-        const k = game.karts.find((x) => x.id === r.kartId);
-        const name = k ? k.name : r.kartId;
-        const pts = game.gp.active ? `<td>+${r.points} (${r.totalPoints})</td>` : '';
-        return `<tr><td>${r.place}.</td><td>${name}${k && k.isPlayer ? ' ★' : ''}</td><td>${fmt(r.time)}${r.estimated ? '*' : ''}</td>${pts}</tr>`;
-      }).join('');
-      nextBtn.hidden = !game.gp.active;
-    }
-    if (!inResults) resultsShown = null;
-    if (inResults && nav.confirm) (game.gp.active ? actions.next : actions.again)();
-  }
-
-  return {
-    update,
-    dispose() {
-      root.removeEventListener('click', onClick);
-      root.remove();
-      style.remove();
+  const ctx = {
+    game,
+    api(name, ...args) {
+      const fn = game.api?.[name];
+      if (typeof fn !== 'function') return undefined;
+      try {
+        const r = fn.apply(game.api, args);
+        if (r && typeof r.then === 'function') r.catch((err) => console.error(`[ui] api.${name} failed`, err));
+        return r;
+      } catch (err) {
+        console.error(`[ui] api.${name} threw`, err);
+        return undefined;
+      }
+    },
+    click() { game.events?.emit?.('uiClick', {}); },
+    device() {
+      const d = game.input?.device;
+      if (d === 'keyboard' && game.touch && !sawNav) return 'touch';
+      if (d === 'gamepad' || d === 'touch' || d === 'keyboard') return d;
+      if (game.input?.pad?.connected) return 'gamepad';
+      return game.touch ? 'touch' : 'keyboard';
+    },
+    reduced: () => !!game.reducedMotion,
+    roster: () => (Array.isArray(ROSTER) ? ROSTER : []),
+    tracks: () => TRACKS || {},
+    cup: () => (Array.isArray(CUP) && CUP.length ? CUP : Object.keys(TRACKS || {})),
+    best(trackId) {
+      const q = { track: trackId, cls: String(game.selection?.cls ?? '120'), character: game.selection?.characterId || 'tilki' };
+      const fn = game.api?.getBest;
+      if (typeof fn === 'function') {
+        try { return fn.call(game.api, q) || null; } catch { return null; }
+      }
+      // Fallback until core exposes api.getBest: core keeps TT bests under tt:<track>:<cls>:<character>.
+      const b = ctx.store.get(`tt:${q.track}:${q.cls}:${q.character}`, null);
+      return b && (b.bestLap || b.bestRace) ? { lap: b.bestLap ?? null, race: b.bestRace ?? null } : null;
+    },
+    fmt: fmtTime,
+    prevStandings: () => prevStandings,
+    store: {
+      get: (k, fb) => { try { return game.storage?.get ? game.storage.get(k, fb) : fb; } catch { return fb; } },
+      set: (k, v) => { try { game.storage?.set?.(k, v); } catch { /* storage is best effort */ } },
+    },
+    glyphs(scope = root) {
+      const dev = ctx.device();
+      for (const g of scope.querySelectorAll('[data-glyph]')) {
+        const t = GLYPHS[dev][g.dataset.glyph];
+        if (t == null) { g.hidden = true; continue; }
+        g.hidden = false;
+        g.textContent = t;
+        g.className = dev === 'gamepad' ? (t.length > 1 ? 'kk-padb kk-wide' : 'kk-padb') : 'kk-key';
+      }
     },
   };
+
+  // Layers, bottom to top.
+  const hud = createHUD(ctx);
+  const touch = createTouch(ctx);
+  const hints = createHints(ctx);
+  const menus = createMenus(ctx);
+  const pause = createPause(ctx);
+  const results = createResults(ctx);
+  const podium = createPodium(ctx);
+  const hudLayer = h('div', { class: 'kk-layer' }, hud.el);
+  const introLayer = h('div', { class: 'kk-layer' });
+  // Settings → "FPS göster": a quiet counter, measured on wall time so it also reads while paused.
+  const fpsEl = h('div', { class: 'kk-fps' });
+  fpsEl.hidden = true;
+  let fpsT0 = 0, fpsFrames = 0;
+  // Hints sit under the HUD: a threat marker or a banner must never hide behind a teaching note.
+  root.append(hud.inkEl, hints.el, hudLayer, touch.el, menus.layer, introLayer, results.el, podium.el, menus.coverWrap, pause.el, fpsEl);
+  touch.bindSlot(hud.slot);
+  hudLayer.hidden = true;
+  pause.el.hidden = true;
+  introLayer.hidden = true;
+  menus.coverWrap.hidden = true;
+
+  const onCtx = (e) => e.preventDefault();
+  host.addEventListener('contextmenu', onCtx);
+  offs.push(() => host.removeEventListener('contextmenu', onCtx));
+
+  // ------------------------------------------------------------- events
+  const on = (name, fn) => { const off = game.events?.on?.(name, fn); if (off) offs.push(off); };
+  on('raceSetup', (p) => {
+    const st = game.gp?.active ? game.gp.standings : null;
+    prevStandings = st && Object.values(st).some((v) => v > 0) ? { ...st } : null;
+    hud.bind(p || {});
+    hints.bind({ track: p?.track || game.track, def: p?.def || game.trackDef });
+  });
+  on('raceTeardown', () => { hud.unbind(); hints.unbind(); intro = null; introLayer.replaceChildren(); });
+  on('countdown', (p) => { hud.onCountdown(p); hints.onCountdown(p); });
+  on('lap', (p) => hud.onLap(p));
+  on('finalLap', (p) => hud.onFinalLap(p));
+  on('checkpoint', (p) => hud.onCheckpoint(p));
+  on('finish', (p) => hud.onFinish(p));
+  on('place', (p) => hud.onPlace(p));
+  on('wrongWay', (p) => hud.onWrongWay(p));
+  on('inked', (p) => hud.onInked(p));
+  on('threat', (p) => hud.onThreat(p));
+  on('boost', (p) => hud.onBoost(p));
+  on('hit', (p) => hud.onHit(p));
+  on('drift', (p) => hints.onDrift(p));
+  on('itemGet', (p) => hints.onItemGet(p));
+  on('settings', () => { menus.refresh(); pause.refresh(); touch.refresh(); });
+
+  // ------------------------------------------------------------- view state, derived from game state every frame
+  let view = 'none';
+  let intro = null;
+  let pauseOpen = false;
+  let lastDevice = '';
+  let lastReduced = null;
+  let lastTouchRace = null;
+
+  function desiredView() {
+    const p = game.phase;
+    if (p === 'title' || p === 'menu') {
+      const s = game.menuScreen;
+      return !s || s === 'title' ? 'title' : 'menu:' + s;
+    }
+    if (p === 'intro') return 'intro';
+    if (p === 'countdown' || p === 'race' || p === 'finishing') return 'race';
+    if (p === 'results') return 'results';
+    if (p === 'podium') return 'podium';
+    return 'none';
+  }
+
+  function enter(next) {
+    const prev = view;
+    view = next;
+    const isMenu = next.startsWith('menu:');
+    const wasMenu = prev.startsWith('menu:');
+
+    if (next === 'title') {
+      menus.hide();
+      menus.coverWrap.hidden = false;
+      if (wasMenu) menus.closeCover();
+      else menus.setCoverInstant(false);
+    } else if (isMenu) {
+      if (prev === 'title') menus.openCover();
+      else menus.setCoverInstant(true);
+      menus.show(next.slice(5));
+    } else {
+      menus.hide();
+      menus.coverWrap.hidden = true;
+    }
+
+    introLayer.hidden = next !== 'intro';
+    if (next === 'intro') {
+      intro = createIntroCard(ctx);
+      introLayer.replaceChildren(intro.el);
+    } else if (intro) {
+      intro = null;
+      introLayer.replaceChildren();
+    }
+
+    hudLayer.hidden = next !== 'race';
+    if (next !== 'race') hud.reset();
+
+    if (next !== 'results') results.close();
+    if (next === 'podium') podium.open(); else podium.close();
+  }
+
+  function update(frameDt = 0) {
+    const want = desiredView();
+    if (want !== view) enter(want);
+    if (view === 'results' && results.ready() && results.stale()) results.open();
+
+    const dev = ctx.device();
+    if (dev !== lastDevice) {
+      lastDevice = dev;
+      root.classList.toggle('kk-touch-ui', dev === 'touch');
+      ctx.glyphs(root);
+    }
+    const rm = !!game.reducedMotion;
+    if (rm !== lastReduced) { lastReduced = rm; root.classList.toggle('kk-rm', rm); }
+
+    const paused = !!game.paused && (view === 'race' || view === 'results' || view === 'intro');
+    if (paused !== pauseOpen) {
+      pauseOpen = paused;
+      pause.el.hidden = !paused;
+      if (paused) pause.open(); else pause.close();
+    }
+
+    const touchRace = !!game.touch && view === 'race' && !paused;
+    if (touchRace !== lastTouchRace) {
+      lastTouchRace = touchRace;
+      touch.setActive(touchRace);
+      root.classList.toggle('kk-touch-race', touchRace);
+    }
+
+    const nav = game.input?.nav || NO_NAV;
+    if (!sawNav && (nav.up || nav.down || nav.left || nav.right || nav.confirm || nav.back || nav.pause)) sawNav = true;
+    if (pauseOpen) pause.handle(nav);
+    else if (view === 'results') results.handle(nav);
+    else if (view === 'podium') podium.handle(nav);
+    else if (view === 'intro') intro?.handle(nav);
+    else if (view === 'title' || view.startsWith('menu:')) menus.handle(nav);
+
+    if (view === 'race') hud.update(frameDt);
+    hints.update(frameDt, view);
+
+    const showFps = !!game.settings?.showFps;
+    if (fpsEl.hidden === showFps) { fpsEl.hidden = !showFps; fpsT0 = 0; fpsEl.textContent = ''; }
+    if (showFps) {
+      const now = performance.now();
+      if (!fpsT0) { fpsT0 = now; fpsFrames = 0; }
+      fpsFrames++;
+      if (now - fpsT0 >= 500) {
+        fpsEl.textContent = `${Math.round((fpsFrames * 1000) / (now - fpsT0))} FPS`;
+        fpsT0 = now;
+        fpsFrames = 0;
+      }
+    }
+  }
+
+  function dispose() {
+    for (const off of offs) off();
+    offs.length = 0;
+    hud.dispose();
+    menus.dispose();
+    pause.dispose();
+    results.dispose();
+    podium.dispose();
+    touch.dispose();
+    hints.dispose();
+    root.remove();
+    style.remove();
+  }
+
+  return { update, dispose };
 }

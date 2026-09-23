@@ -26,6 +26,7 @@ uniform float uEdgeLo;
 uniform float uEdgeHi;
 uniform float uGrain;
 uniform float uVignette;
+uniform vec2 uMis;
 varying vec2 vUv;
 
 float invZ( vec2 uv ) {
@@ -35,7 +36,8 @@ float invZ( vec2 uv ) {
 }
 
 void main() {
-  vec3 col = texture2D( tColor, vUv ).rgb;
+  // colour plates sit a whole pixel off the key (ink) plate: a slight print misregistration at outlines
+  vec3 col = texture2D( tColor, vUv + uMis ).rgb;
   vec2 px = uThick / uRes;
   float c = invZ( vUv );
   float l = invZ( vUv - vec2( px.x, 0.0 ) );
@@ -47,10 +49,11 @@ void main() {
   float rel = lap / nearest;
   float zc = 1.0 / nearest;
   float edge = smoothstep( uEdgeLo, uEdgeHi, rel ) * ( 1.0 - smoothstep( 160.0, 420.0, zc ) );
-  col = mix( col, uInk, edge * 0.92 );
-
   float g = texture2D( tGrain, gl_FragCoord.xy / ( 256.0 * uPR ) ).r;
-  col *= 1.0 - uGrain * ( 1.0 - g ) * 3.0;
+  float tooth = texture2D( tGrain, gl_FragCoord.xy / ( 1100.0 * uPR ) + 0.37 ).r;
+  // the pen skips on the paper's tooth, so lines are not perfectly solid
+  col = mix( col, uInk, edge * ( 0.8 + 0.14 * smoothstep( 0.86, 0.98, g ) ) );
+  col *= 1.0 - uGrain * ( ( 1.0 - g ) * 3.0 + ( 1.0 - tooth ) * 1.6 );
 
   vec2 q = vUv - 0.5;
   float vig = smoothstep( 0.85, 0.25, length( q * vec2( 1.0, 0.8 ) ) );
@@ -75,6 +78,7 @@ export function createPost(renderer, materials, cfg) {
       uRes: { value: new THREE.Vector2(1, 1) }, uNear: { value: cfg.camera.near }, uFar: { value: cfg.camera.far },
       uInk: { value: new THREE.Color('#2d2a32') }, uThick: { value: 1 }, uPR: { value: 1 },
       uEdgeLo: { value: 0.012 }, uEdgeHi: { value: 0.03 }, uGrain: { value: 0.05 }, uVignette: { value: 0.16 },
+      uMis: { value: new THREE.Vector2() },
     },
     vertexShader: VERT, fragmentShader: FRAG, depthTest: false, depthWrite: false,
   });
@@ -106,6 +110,8 @@ export function createPost(renderer, materials, cfg) {
     // whole pixels: with nearest depth samples a fractional offset lands -1/+2 px, and the uneven
     // Laplacian then inks flat ground near the horizon.
     mat.uniforms.uThick.value = Math.max(1, Math.round(outlinePx * (h * pr) / 720));
+    const rw = Math.max(1, Math.round(w * pr)), rh = Math.max(1, Math.round(h * pr));
+    mat.uniforms.uMis.value.set(mat.uniforms.uThick.value / rw, -mat.uniforms.uThick.value / rh);
     if (enabled) makeTarget();
   }
 

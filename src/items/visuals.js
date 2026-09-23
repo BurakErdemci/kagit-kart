@@ -5,16 +5,37 @@ import * as THREE from 'three';
 import { clamp, lerpAngle, smoothstep } from '../core/math.js';
 import {
   blobGeometry, bottleGeometry, boxAtlas, boxGeometry, discGeometry, flyerGeometry, foilShellGeometry,
-  penGeometry, scissorsHalfGeometry,
+  gumGeometry, gumSeeds, penGeometry, scissorsHalfGeometry,
 } from './shapes.js';
 
 const CAP = { gum: 72, flyer: 16, pen: 40, bottle: 4, drop: 72, scissors: 4, decal: 72 };
 const TUMBLES = 8;
+// Flight-path trail: samples every TRAIL_DT s, each lives TRAIL_LIFE s (≈ 20 m behind a plane).
+const TRAIL_N = 12;
+const TRAIL_DT = 0.045;
+const TRAIL_LIFE = 0.5;
+// Planes fly visually a little higher than they hit (sim hover 0.75 m), so they clear the kart's own
+// silhouette in the chase view almost at once; the hit test still uses the simulated height.
+const FLYER_LIFT = 0.5;
 const INK_BLUE = '#2a4a9c';
+// The boxes' own paper, the same on every chapter: they must read at a glance by day and by night,
+// and a theme's accents can be two near-identical yellows and a cream (Boğaz Gecesi).
+// Cells: 0 = front/back faces, 1 = top/bottom, 2 = left/right.
+const BOX_PAPER = ['#ffbf1f', '#2f7fe6', '#f0506e'];
+
+// Self-lit share of the box paper, and the printed "?" drawn at full albedo like a lit sign. The "?" is
+// the only near-white print in the atlas, so its mask is the texel's darkest channel.
+const BOX_LIGHT_GLSL = /* glsl */`
+{
+  float kkQ = gl_FrontFacing ? smoothstep( 0.62, 0.74, min( min( diffuseColor.r, diffuseColor.g ), diffuseColor.b ) ) : 0.0;
+  outgoingLight = mix( outgoingLight, diffuseColor.rgb * ( 1.0 + 0.12 * kkQ ), max( uSelfLit, kkQ ) );
+}
+`;
 
 const Y = new THREE.Vector3(0, 1, 0);
 const Z = new THREE.Vector3(0, 0, 1);
 const ONE = new THREE.Vector3(1, 1, 1);
+const Z_ID = new THREE.Quaternion();
 const _m = new THREE.Matrix4();
 const _m2 = new THREE.Matrix4();
 const _km = new THREE.Matrix4();
@@ -26,6 +47,7 @@ const _p2 = new THREE.Vector3();
 const _p3 = new THREE.Vector3();
 const _s = new THREE.Vector3();
 const _e = new THREE.Euler(0, 0, 0, 'YXZ');
+const _col = new THREE.Color();
 
 // Box net: side faces swing out about their bottom edge, the lid rides on the front face and opens
 // about its own hinge. Faces fall open in sequence so the unfold reads as paper, not a scale-down.
@@ -53,7 +75,10 @@ const FOLD_GLSL = /* glsl */`
 }
 `;
 
-// Gold foil: facets that mirror the sun flash, and a sheen band sweeps along the wrapper.
+// Cellophane and gold foil. The clear body is nearly invisible face-on and turns to a gold rim at grazing
+// angles, cut into two hard bands like a printed highlight; the crinkled facets (flat normals) flash
+// white where they mirror the sun, and a glint band sweeps along the wrap. The twisted ends (vKkEnd)
+// are opaque gold foil with the same glints.
 const FOIL_GLSL = /* glsl */`
 {
   vec3 kkV = normalize( vViewPosition );
@@ -61,13 +86,67 @@ const FOIL_GLSL = /* glsl */`
   #if NUM_DIR_LIGHTS > 0
     kkL = directionalLights[ 0 ].direction;
   #endif
-  float kkSpec = pow( max( dot( reflect( -kkV, normal ), kkL ), 0.0 ), 14.0 );
-  float kkFacet = fract( sin( dot( floor( vPaperWorld * 2.7 ), vec3( 12.9898, 78.233, 37.719 ) ) ) * 43758.5453 );
-  float kkBand = smoothstep( 0.9, 0.99, sin( dot( vPaperWorld, vec3( 0.8, 0.45, 0.5 ) ) * 2.4 - uTime * 7.0 ) );
-  // crinkles: neighbouring patches of foil catch the light differently
-  outgoingLight *= 0.82 + 0.36 * kkFacet;
-  float kkGlint = clamp( kkSpec * ( 0.3 + 1.3 * step( 0.55, kkFacet ) ) + kkBand * ( 0.2 + 0.6 * kkFacet ), 0.0, 1.0 );
-  outgoingLight = mix( outgoingLight, vec3( 1.0, 0.96, 0.8 ), kkGlint );
+  float kkNV = abs( dot( normal, kkV ) );
+  float kkRim = 1.0 - kkNV;
+  float kkRimBand = 0.5 * step( 0.5, kkRim ) + 0.5 * step( 0.78, kkRim );
+  float kkSpec = step( 0.8, pow( max( dot( reflect( -kkV, normal ), kkL ), 0.0 ), 10.0 ) );
+  float kkBand = step( 0.93, sin( dot( vKkObj, vec3( 0.55, 1.3, 0.8 ) ) * 2.6 - uTime * 6.0 ) );
+  vec3 kkGold = vec3( 0.93, 0.62, 0.12 );
+  vec3 kkPale = vec3( 1.0, 0.93, 0.66 );
+  vec3 kkClear = mix( kkPale, kkGold, kkRimBand * 0.6 );
+  float kkA = 0.07 + 0.5 * kkRimBand + 0.75 * max( kkSpec, kkBand * 0.8 );
+  vec3 kkEndCol = mix( outgoingLight, kkPale, 0.65 * max( kkSpec, kkBand ) );
+  vec3 kkBodyCol = mix( kkClear, vec3( 1.0, 0.98, 0.9 ), max( kkSpec, kkBand ) );
+  outgoingLight = mix( kkBodyCol, kkEndCol, vKkEnd );
+  diffuseColor.a = mix( clamp( kkA, 0.0, 0.92 ), 1.0, vKkEnd );
+}
+`;
+
+// Crumpled-paper print for the gum: cells around designed seed points on the unit sphere, a pressed
+// crease where two cells meet and a slightly different tone per cell, all in object space.
+function gumPrint(seeds) {
+  const n = seeds.length;
+  const arr = seeds.map((s) => `vec3( ${s.map((x) => x.toFixed(4)).join(', ')} )`).join(', ');
+  return /* glsl */`
+{
+  const vec3 kkSeeds[ ${n} ] = vec3[ ${n} ]( ${arr} );
+  vec3 kkQ = normalize( vKkObj + vec3( 1e-4 ) );
+  float kkD1 = 9.0;
+  float kkD2 = 9.0;
+  float kkId = 0.0;
+  for ( int i = 0; i < ${n}; i ++ ) {
+    float d = distance( kkQ, kkSeeds[ i ] );
+    if ( d < kkD1 ) { kkD2 = kkD1; kkD1 = d; kkId = float( i ); }
+    else if ( d < kkD2 ) kkD2 = d;
+  }
+  float kkE = kkD2 - kkD1;
+  float kkW = fwidth( kkE ) + 1e-4;
+  float kkCrease = 1.0 - smoothstep( 0.02, 0.02 + 1.5 * kkW, kkE );
+  // blown into a bubble the paper shows its gores instead: six meridian folds, fading at the poles
+  float kkAz = atan( kkQ.z, kkQ.x ) * 0.9549297 + 0.5;
+  float kkG = abs( fract( kkAz ) - 0.5 );
+  float kkGore = ( 1.0 - smoothstep( 0.012, 0.04, kkG ) ) * ( 1.0 - smoothstep( 0.75, 0.95, abs( kkQ.y ) ) );
+  float kkLine = mix( kkCrease, kkGore, vKkBub );
+  diffuseColor.rgb *= mix( 0.95 + 0.1 * fract( kkId * 0.618 ), 1.0, vKkBub ) * ( 1.0 - 0.3 * kkLine );
+}
+`;
+}
+
+// Printed gloss on the gum, as on a cartoon bubble: a hot spot and a crescent towards the upper left in
+// view space, drawn unlit; the rest keeps a self-lit share so the pink holds at night.
+const GUM_GLOSS_GLSL = /* glsl */`
+{
+  outgoingLight = mix( outgoingLight, diffuseColor.rgb, uSelfLit );
+  vec3 kkN = normalize( normal );
+  vec3 kkS = normalize( vec3( -0.42, 0.55, 0.72 ) );
+  float kkD = dot( kkN, kkS );
+  float kkW = fwidth( kkD ) + 1e-4;
+  float kkSpot = smoothstep( 0.962 - kkW, 0.962 + kkW, kkD );
+  float kkRing = smoothstep( 0.8 - kkW, 0.8 + kkW, kkD ) * ( 1.0 - smoothstep( 0.875 - kkW, 0.875 + kkW, kkD ) );
+  vec2 kkDir = normalize( kkS.xy );
+  float kkOuter = step( length( kkS.xy ) + 0.05, dot( kkN.xy, kkDir ) );
+  float kkGloss = max( kkSpot, kkRing * kkOuter );
+  outgoingLight = mix( outgoingLight, vec3( 1.0, 0.94, 0.97 ), kkGloss * 0.95 );
 }
 `;
 
@@ -77,9 +156,11 @@ export function createItemVisuals(game, sim) {
   const theme = game.trackDef?.theme || {};
   const ink = theme.ink || '#2d2a32';
   const paperCol = theme.paper || '#f3ead3';
-  const accents = Array.isArray(theme.accents) && theme.accents.length >= 3 ? theme.accents : ['#f2c14e', '#e56b6f', '#6c8ead'];
+  const roadC = new THREE.Color(theme.road || '#9aa1a8');
+  const night = 0.2126 * roadC.r + 0.7152 * roadC.g + 0.0722 * roadC.b < 0.2;
   const sunDir = new THREE.Vector3(...(theme.sun?.dir || [0.45, 0.8, 0.35])).normalize();
   const karts = game.karts;
+  const camPos = game.camera.position;
 
   const root = new THREE.Group();
   root.name = 'items';
@@ -138,7 +219,7 @@ export function createItemVisuals(game, sim) {
   const boxBase = [];
   const boxAngle = [];
   if (sim.boxes.length) {
-    const atlas = boxAtlas(accents, ink, '#fbf6e9', game.config.fonts?.body || 'system-ui, sans-serif');
+    const atlas = boxAtlas(BOX_PAPER, '#2d2a32', '#fbf6e9', game.config.fonts?.body || 'system-ui, sans-serif');
     textures.push(atlas);
     const g = geo(boxGeometry(T.boxHalf));
     foldAttr = new THREE.InstancedBufferAttribute(new Float32Array(sim.boxes.length), 1);
@@ -146,12 +227,15 @@ export function createItemVisuals(game, sim) {
     g.setAttribute('aFold', foldAttr);
     const mat = extend(mats.paper('#ffffff', { unique: true, map: atlas, side: THREE.DoubleSide }), 'box', (shader) => {
       shader.uniforms.uHalf = { value: T.boxHalf };
-      shader.uniforms.uBack = { value: new THREE.Color(paperCol).multiplyScalar(0.97) };
+      shader.uniforms.uBack = { value: new THREE.Color('#fbf6e9').multiplyScalar(0.94) };
+      shader.uniforms.uSelfLit = { value: night ? 0.42 : 0.16 };
       shader.vertexShader = 'attribute float aFace;\nattribute float aFold;\nuniform float uHalf;\n' +
         shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n' + FOLD_GLSL);
       // the inside of the paper shows once the cube lies open on the page
-      shader.fragmentShader = 'uniform vec3 uBack;\n' +
-        shader.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\nif ( !gl_FrontFacing ) diffuseColor.rgb = uBack;');
+      shader.fragmentShader = 'uniform vec3 uBack;\nuniform float uSelfLit;\n' +
+        shader.fragmentShader
+          .replace('#include <color_fragment>', '#include <color_fragment>\nif ( !gl_FrontFacing ) diffuseColor.rgb = uBack;')
+          .replace('#include <opaque_fragment>', BOX_LIGHT_GLSL + '\n#include <opaque_fragment>');
     });
     boxMesh = inst(g, mat, sim.boxes.length, 'boxes', true);
     for (let i = 0; i < sim.boxes.length; i++) {
@@ -161,8 +245,23 @@ export function createItemVisuals(game, sim) {
   }
 
   // --- gum, gum bits, strings (one mesh) --------------------------------------------------------
+  const gumGeo = geo(gumGeometry());
+  const bubAttr = new THREE.InstancedBufferAttribute(new Float32Array(CAP.gum), 1);
+  bubAttr.setUsage(THREE.DynamicDrawUsage);
+  gumGeo.setAttribute('aGumBub', bubAttr);
+  const gumMat = extend(mats.paper('#ffffff', { unique: true, vertexColors: true, flat: false }), 'gum', (shader) => {
+    shader.uniforms.uSelfLit = { value: night ? 0.3 : 0.06 };
+    shader.vertexShader = 'attribute vec3 aBub;\nattribute float aGumBub;\nvarying vec3 vKkObj;\nvarying float vKkBub;\n' +
+      shader.vertexShader
+        .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\nobjectNormal = normalize( mix( objectNormal, aBub, max( aGumBub, 0.72 ) ) );')
+        .replace('#include <begin_vertex>', '#include <begin_vertex>\ntransformed = mix( transformed, aBub, aGumBub );\nvKkObj = aBub;\nvKkBub = aGumBub;');
+    shader.fragmentShader = 'varying vec3 vKkObj;\nvarying float vKkBub;\nuniform float uSelfLit;\n' +
+      shader.fragmentShader
+        .replace('#include <color_fragment>', '#include <color_fragment>\n' + gumPrint(gumSeeds(9)))
+        .replace('#include <opaque_fragment>', GUM_GLOSS_GLSL + '\n#include <opaque_fragment>');
+  });
+  const gumMesh = inst(gumGeo, gumMat, CAP.gum, 'gum', true);
   const blob = geo(blobGeometry('#f06fa8', '#ffe1ee', '#c94f8a'));
-  const gumMesh = inst(blob, vertexColored, CAP.gum, 'gum', true);
   const dropMesh = inst(blob, mats.paper(INK_BLUE), CAP.drop, 'ink-drops');
 
   // --- flyers: plane + homing share one mesh ----------------------------------------------------
@@ -184,11 +283,28 @@ export function createItemVisuals(game, sim) {
   const scissorsMesh = inst(geo(scissorsHalfGeometry()), vertexColored, CAP.scissors, 'scissors');
   const decalMesh = inst(geo(discGeometry()), mats.emissive(ink, { transparent: true, opacity: 0.3 }), CAP.decal, 'shadows');
   decalMesh.renderOrder = -1;
+  // A plane's flight path, drawn behind it as a dashed line like in a picture book: ink by day, paper by
+  // night, red for the homing plane.
+  const dashMesh = inst(geo(new THREE.BoxGeometry(1, 1, 1)), mats.emissive('#ffffff'), CAP.flyer * TRAIL_N, 'flight-dashes');
+  dashMesh.setColorAt(0, _col.set('#ffffff'));
+  const dashPlane = new THREE.Color(night ? '#f4e6c4' : '#3a3444');
+  const dashHoming = new THREE.Color('#e0412f');
+  const trails = [];
+  for (let i = 0; i < CAP.flyer; i++) {
+    trails.push({
+      id: -1, seen: false, homing: false, xyz: new Float32Array(TRAIL_N * 3), at: new Float32Array(TRAIL_N),
+      n: 0, head: 0, next: 0, tipX: 0, tipY: 0, tipZ: 0,
+    });
+  }
+  dashMesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
 
   // --- foil shells ------------------------------------------------------------------------------
   const shellGeo = geo(foilShellGeometry());
-  const foilMat = extend(mats.paper('#d7a53a', { unique: true }), 'foil', (shader) => {
-    shader.fragmentShader = shader.fragmentShader.replace('#include <opaque_fragment>', FOIL_GLSL + '\n#include <opaque_fragment>');
+  const foilMat = extend(mats.paper('#e3a92c', { unique: true, transparent: true, depthWrite: false, halftone: false }), 'foil', (shader) => {
+    shader.vertexShader = 'attribute float aEnd;\nvarying float vKkEnd;\nvarying vec3 vKkObj;\n' +
+      shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvKkEnd = aEnd;\nvKkObj = position;');
+    shader.fragmentShader = 'varying float vKkEnd;\nvarying vec3 vKkObj;\n' +
+      shader.fragmentShader.replace('#include <opaque_fragment>', FOIL_GLSL + '\n#include <opaque_fragment>');
   });
   // Present at setup so compileAsync builds its program before the first foil is used.
   const foilProbe = new THREE.Mesh(shellGeo, foilMat);
@@ -341,10 +457,19 @@ export function createItemVisuals(game, sim) {
   }
 
   // --- gum --------------------------------------------------------------------------------------
+  // Held: a bubble blown from a chewed knot, trailing on a string of gum. Dropped: the bubble swells,
+  // pops and splats into a flat chewed wad that wobbles to rest.
+  const GUM_R = 0.42;
+  function gumAt(n, pos, quat, sx, sy, sz, bub) {
+    setAt(gumMesh, n, pos, quat, sx, sy, sz);
+    bubAttr.array[n] = bub;
+    return n + 1;
+  }
+
   function updateGum(now, alpha, rm, frameDt) {
     let n = 0;
     const hz = sim.hazards;
-    for (let i = 0; i < hz.length && n < CAP.gum - 2; i++) {
+    for (let i = 0; i < hz.length && n < CAP.gum - 3; i++) {
       const h = hz[i];
       if (h.dead) continue;
       const yaw = h.id * 2.4;
@@ -352,45 +477,50 @@ export function createItemVisuals(game, sim) {
         const k = h.held;
         kartFrame(k, _km);
         const sway = rm ? 0 : Math.sin(vt * 6 + h.id) * 0.18;
+        const bob = rm ? 0 : Math.abs(Math.sin(vt * 9 + h.id)) * 0.06;
         _p.set(sway, 0, -T.gumBack).applyMatrix4(_km);
         _p.y = h.prevPos.y + (h.pos.y - h.prevPos.y) * alpha;
         _q.setFromUnitVectors(Y, h.up);
         _q2.setFromAxisAngle(Y, k.heading);
         _q.multiply(_q2);
-        const sy = 0.3, sx = 0.5;
-        _p2.copy(_p).addScaledVector(h.up, 0.45 * sy);
-        setAt(gumMesh, n++, _p2, _q, sx, sy, 0.6);
-        // the string of gum from the kart's tail to the blob
-        _p3.set(0, 0.42, -1.02).applyMatrix4(_km);
-        _p2.addScaledVector(h.up, 0.12);
-        const len = _p3.distanceTo(_p2);
-        _p.addVectors(_p3, _p2).multiplyScalar(0.5);
-        _p.y -= 0.08;
-        _p3.sub(_p2).normalize();
-        _q.setFromUnitVectors(Z, _p3);
-        setAt(gumMesh, n++, _p, _q, 0.05, 0.05, len * 0.5);
+        _p2.copy(_p).addScaledVector(h.up, GUM_R + 0.04 + bob);
+        n = gumAt(n, _p2, _q, GUM_R, GUM_R, GUM_R, 1);
+        // the chewed knot on the kart side, where the string holds the bubble
+        _p3.set(0, 0, 1).applyQuaternion(_q).multiplyScalar(GUM_R * 0.92).add(_p2);
+        n = gumAt(n, _p3, _q, 0.15, 0.12, 0.13, 0);
+        // the string of gum from the kart's tail to the knot
+        _p2.set(0, 0.42, -1.02).applyMatrix4(_km);
+        const len = _p2.distanceTo(_p3);
+        _p.addVectors(_p2, _p3).multiplyScalar(0.5);
+        _p.y -= 0.06;
+        _p2.sub(_p3).normalize();
+        _q.setFromUnitVectors(Z, _p2);
+        n = gumAt(n, _p, _q, 0.045, 0.045, len * 0.5, 1);
       } else {
         const age = now - h.dropT;
-        let sxz = 0.75, sy = 0.3, lift = 0;
+        let sxz = 0.8, sy = 0.34, lift = 0, bub = 0;
         if (!rm) {
           const fell = h.heldFor < 0.25;
-          const fall = 0.14;
+          const fall = 0.14, swell = 0.08;
           if (fell && age < fall) {
             const t = age / fall;
             lift = 0.55 * (1 - t * t);
-            sxz = 0.46; sy = 0.62;
+            sxz = sy = 0.3; bub = 1;
+          } else if (!fell && age < swell) {
+            bub = 1;
+            sxz = sy = GUM_R * (1 + 0.3 * age / swell);
           } else {
-            const t = age - (fell ? fall : 0);
+            const t = age - (fell ? fall : swell);
             const w = Math.exp(-7 * t) * Math.cos(17 * t);
-            sxz = 0.75 * (1 + 0.42 * w);
-            sy = 0.3 * (1 - 0.55 * w);
+            sxz = 0.8 * (1 + 0.42 * w);
+            sy = 0.34 * (1 - 0.55 * w);
           }
         }
         _q.setFromUnitVectors(Y, h.up);
         _q2.setFromAxisAngle(Y, yaw);
         _q.multiply(_q2);
-        _p.copy(h.pos).addScaledVector(h.up, 0.45 * sy + lift);
-        setAt(gumMesh, n++, _p, _q, sxz, sy, sxz);
+        _p.copy(h.pos).addScaledVector(h.up, (bub ? sy + 0.04 : 0.45 * sy) + lift);
+        n = gumAt(n, _p, _q, sxz, sy, sxz, bub);
       }
     }
     // gum bits from a burst blob
@@ -404,30 +534,39 @@ export function createItemVisuals(game, sim) {
       if (b.pos.y < b.floor + 0.05) { b.pos.y = b.floor + 0.05; b.vel.multiplyScalar(0.4); }
       const s = 0.2 * (1 - smoothstep(0.3, 0.5, b.t));
       _q.identity();
-      setAt(gumMesh, n++, b.pos, _q, s, s, s);
+      n = gumAt(n, b.pos, _q, s, s, s, 1);
     }
+    if (n > 0) bubAttr.needsUpdate = true;
     finish(gumMesh, n);
   }
 
   // --- pens (rocket) ----------------------------------------------------------------------------
+  // Held pens lie across the rear bumper, small and low, alternating nib left / right and fanned a
+  // little, so from the chase camera they read side-on as pens and the driver's back stays clear.
+  const STOW_S = 0.62;
+  const STOW_LEN = 1.35 * STOW_S;
   function stowPose(s, n, out) {
-    const x = (s - (n - 1) / 2) * 0.32;
-    _p.set(x, 1.0, -0.9);
-    _e.set(-0.35, x * 0.35, 0, 'YXZ'); // nib raised, fanned slightly outwards
+    const dir = s % 2 ? -1 : 1;
+    _p.set(dir * STOW_LEN * 0.5, 0.44 + s * 0.14, -1.22 - s * 0.04);
+    // a small shared tilt, so the rack reads as clipped on by hand rather than welded square
+    _e.set(-0.07 * dir, dir * Math.PI / 2, 0, 'YXZ');
     _q.setFromEuler(_e);
-    return out.compose(_p, _q, ONE);
+    _s.setScalar(STOW_S);
+    return out.compose(_p, _q, _s);
   }
 
+  // From the stowed pose the pen swings round behind the tail, nib back, and grows to full size.
   function firePose(t, rm, out) {
-    const slide = smoothstep(0, 1, t / 0.1);
+    const slide = smoothstep(0, 1, t / 0.12);
     const kick = t < 0.05 ? t / 0.05 : Math.exp(-(t - 0.05) * 9);
     const shake = rm ? 0 : 0.018;
+    stowPose(0, 1, _m);
+    _m.decompose(_p2, _q2, _s);
     _p.set(Math.sin(vt * 71) * shake, 0.6 + Math.sin(vt * 53) * shake, -1.06 - 0.28 * kick);
-    _p2.set(0, 1.0, -0.9);
     _p.lerpVectors(_p2, _p, slide);
-    _e.set(-0.35 * (1 - slide), 0, 0, 'YXZ');
-    _q.setFromEuler(_e);
-    return out.compose(_p, _q, ONE);
+    _q.slerpQuaternions(_q2, Z_ID, slide);
+    _s.setScalar(STOW_S + (1 - STOW_S) * slide);
+    return out.compose(_p, _q, _s);
   }
 
   function updatePens(frameDt, rm) {
@@ -469,6 +608,89 @@ export function createItemVisuals(game, sim) {
     finish(penMesh, n);
   }
 
+  // --- flight-path trails -------------------------------------------------------------------------
+  function trailSample(p, tail) {
+    let tr = null, free = null;
+    for (let i = 0; i < trails.length; i++) {
+      const t = trails[i];
+      if (t.id === p.id) { tr = t; break; }
+      if (!free && t.id < 0) free = t;
+    }
+    if (!tr) {
+      tr = free;
+      if (!tr) return;
+      tr.id = p.id;
+      tr.n = 0;
+      tr.head = 0;
+      tr.next = vt;
+    }
+    tr.seen = true;
+    tr.homing = p.kind === 'homing';
+    const o = tr.head * 3;
+    if (vt >= tr.next || tr.n === 0) {
+      tr.xyz[o] = tail.x; tr.xyz[o + 1] = tail.y; tr.xyz[o + 2] = tail.z;
+      tr.at[tr.head] = vt;
+      tr.head = (tr.head + 1) % TRAIL_N;
+      tr.n = Math.min(TRAIL_N, tr.n + 1);
+      tr.next = vt + TRAIL_DT;
+    }
+    tr.tipX = tail.x; tr.tipY = tail.y; tr.tipZ = tail.z;
+  }
+
+  // The path stays where it was drawn, so its oldest dashes fall behind the thrower; between the
+  // camera and the kart it follows they would read as a pole stuck in that kart, so they are skipped.
+  let dashNear = 0;
+  function dash(ax, ay, az, bx, by, bz, w, col, n) {
+    _p2.set((ax + bx) * 0.5, (ay + by) * 0.5, (az + bz) * 0.5);
+    const d = camPos.distanceTo(_p2);
+    if (d < dashNear) return n;
+    _p.set(bx - ax, by - ay, bz - az);
+    const len = _p.length();
+    if (len < 0.05) return n;
+    _p.multiplyScalar(1 / len);
+    _q.setFromUnitVectors(Z, _p);
+    const k = 1 + clamp((d - 8) * 0.02, 0, 0.7);
+    setAt(dashMesh, n, _p2, _q, w * k, w * k, len);
+    dashMesh.setColorAt(n, col);
+    return n + 1;
+  }
+
+  // Dashes cover the middle of each gap between samples, so the line is dashed and stays put in the
+  // world while the plane draws it; each dash thins out as it ages.
+  function updateTrails() {
+    let n = 0;
+    const tgt = game.cameraRig?.target;
+    const tp = tgt?.visual?.object3d?.position || tgt?.pos;
+    dashNear = tp && !game.cameraRig.override && !game.cameraRig.debugMode ? camPos.distanceTo(tp) + 1.5 : 0;
+    for (let i = 0; i < trails.length; i++) {
+      const tr = trails[i];
+      if (tr.id < 0) continue;
+      const newest = (tr.head - 1 + TRAIL_N) % TRAIL_N;
+      if (!tr.seen && (tr.n === 0 || vt - tr.at[newest] > TRAIL_LIFE)) { tr.id = -1; tr.n = 0; continue; }
+      const col = tr.homing ? dashHoming : dashPlane;
+      // while the plane flies, the newest dash runs from its tail to the last sample
+      let ax = tr.tipX, ay = tr.tipY, az = tr.tipZ;
+      let j = 0;
+      if (!tr.seen) {
+        ax = tr.xyz[newest * 3]; ay = tr.xyz[newest * 3 + 1]; az = tr.xyz[newest * 3 + 2];
+        j = 1;
+      }
+      for (; j < tr.n && n < CAP.flyer * TRAIL_N; j++) {
+        const s = (tr.head - 1 - j + TRAIL_N * 2) % TRAIL_N;
+        const age = vt - tr.at[s];
+        if (age > TRAIL_LIFE) break;
+        const bx = tr.xyz[s * 3], by = tr.xyz[s * 3 + 1], bz = tr.xyz[s * 3 + 2];
+        const w = 0.13 * Math.sqrt(1 - age / TRAIL_LIFE);
+        n = dash(ax + (bx - ax) * 0.22, ay + (by - ay) * 0.22, az + (bz - az) * 0.22,
+          ax + (bx - ax) * 0.78, ay + (by - ay) * 0.78, az + (bz - az) * 0.78, w, col, n);
+        ax = bx; ay = by; az = bz;
+      }
+      tr.seen = false;
+    }
+    if (n > 0) dashMesh.instanceColor.needsUpdate = true;
+    finish(dashMesh, n);
+  }
+
   // --- projectiles ------------------------------------------------------------------------------
   function updateProjectiles(alpha) {
     let nf = 0, nb = 0, ns = 0;
@@ -488,13 +710,18 @@ export function createItemVisuals(game, sim) {
           pitch = Math.sin(p.age * 9 + p.id) * 0.06;
         }
         if (p.falling) pitch = Math.min(1.2, (p.age - p.fallAt) * 2.2);
-        _p.y += Math.sin(p.age * 8 + p.id) * 0.06;
+        _p.y += Math.sin(p.age * 8 + p.id) * 0.06 + FLYER_LIFT * smoothstep(0, 0.18, p.age);
         _e.set(pitch, heading, roll, 'YXZ');
         _q.setFromEuler(_e);
-        setAt(flyerMesh, nf, _p, _q, 1, 1, 1);
+        // grows with distance so a plane far down the road is still a plane, not a speck
+        const sc = 1 + clamp((camPos.distanceTo(_p) - 8) * 0.02, 0, 0.7);
+        setAt(flyerMesh, nf, _p, _q, sc, sc, sc);
         kindAttr.array[nf] = p.kind === 'homing' ? 1 : 0;
         nf++;
-        if (!p.falling) decal(_p.x, p.groundY, _p.z, p.up, _p.y - p.groundY, 0.5, 0.95, heading);
+        if (!p.falling) decal(_p.x, p.groundY, _p.z, p.up, _p.y - p.groundY, 0.5 * sc, 0.95 * sc, heading);
+        // the trail starts at the tail
+        _p2.set(0, 0, -1.2 * sc).applyQuaternion(_q).add(_p);
+        trailSample(p, _p2);
       } else if (p.kind === 'ink' && nb < CAP.bottle) {
         _p2.set(Math.cos(heading), 0, -Math.sin(heading));
         _q.setFromAxisAngle(_p2, p.age * 11);
@@ -529,6 +756,7 @@ export function createItemVisuals(game, sim) {
     }
     kindAttr.needsUpdate = nf > 0;
     finish(flyerMesh, nf);
+    updateTrails();
     finish(bottleMesh, nb);
     finish(scissorsMesh, ns);
   }

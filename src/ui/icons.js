@@ -18,27 +18,29 @@ function printed(shapes, lines = '', { sw = 2.6, rot = 0, off = '1.7 1.4', view 
     `<g${g} fill="none" stroke="${INK}" stroke-width="${sw}" stroke-linejoin="round" stroke-linecap="round">${line}${lines}</g></svg>`;
 }
 
-const pencil = (t = '') => [
-  { t, d: 'M27 57Q32 70 37 57Z', fill: '#d9483b' },
-  { t, d: 'M29 57Q32 64 35 57Z', fill: '#f2c14e', line: false },
-  { t, d: 'M26 19H38V46H26Z', fill: '#f2c14e' },
-  { t, d: 'M26 19L32 6L38 19Z', fill: '#ecd2a8' },
-  { t, d: 'M30 10.5L32 6L34 10.5Z', fill: INK, line: false },
-  { t, d: 'M26 46H38V50H26Z', fill: '#b8b3a8' },
-  { t, d: 'M26 50H38V54Q38 57 35 57H29Q26 57 26 54Z', fill: '#e56b6f' },
+// The rocket is the fountain pen the kart carries in the world (items/shapes.js penGeometry): navy
+// barrel, gold band, black grip, gold nib with its slit, steel clip.
+const fountainPen = (t = '') => [
+  { t, d: 'M25 13Q25 4 32 4Q39 4 39 13V35H25Z', fill: '#2b3a6b' },
+  { t, d: 'M25 30H39V35H25Z', fill: '#e0b44c' },
+  { t, d: 'M27.5 35H36.5V43H27.5Z', fill: '#1d1b22' },
+  { t, d: 'M26.5 43H37.5Q37 51 32 61Q27 51 26.5 43Z', fill: '#e0b44c' },
+  { t, d: 'M36 7H40V23Q40 25.5 38 25.5Q36 25.5 36 23Z', fill: '#c9ced6' },
+  { t, d: 'M32 50V58', fill: 'none' },
+  { t, d: circ(32, 49, 1.6), fill: INK, line: false },
 ];
 
 export const ITEMS = {
   rocket: {
     name: 'Roket Kalem',
-    svg: printed(pencil(), '<path d="M32 19V46"/>', { rot: 45 }),
+    svg: printed(fountainPen(), '', { rot: 45 }),
   },
   rocket3: {
     name: 'Üçlü Roket',
     svg: printed([
-      ...pencil('translate(-6 10) scale(.62) rotate(-18 32 32)'),
-      ...pencil('translate(26 10) scale(.62) rotate(18 32 32)'),
-      ...pencil('translate(10 2) scale(.66)'),
+      ...fountainPen('translate(-6 10) scale(.62) rotate(-18 32 32)'),
+      ...fountainPen('translate(26 10) scale(.62) rotate(18 32 32)'),
+      ...fountainPen('translate(10 2) scale(.66)'),
     ], '', { rot: 30, sw: 2.2 }),
   },
   gum: {
@@ -223,5 +225,7 @@ export function trackSketch(points, size = 100, pad = 8) {
 export const ROTATE_PHONE = `<svg viewBox="0 0 64 64" aria-hidden="true"><g fill="none" stroke="${INK}" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"><rect x="20" y="8" width="24" height="40" rx="4" fill="${PAPER}"/><path d="M50 40a18 18 0 0 1-18 18M36 54l-4 4 4 4"/></g></svg>`;
 
 export const WRONG_SIGN = `<svg viewBox="0 0 100 100" aria-hidden="true"><path d="M50 3L97 50L50 97L3 50Z" fill="#f2c14e" stroke="${INK}" stroke-width="4" stroke-linejoin="round"/><path d="M50 12L88 50L50 88L12 50Z" fill="none" stroke="${INK}" stroke-width="2.5" stroke-linejoin="round"/><g fill="none" stroke="${INK}" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"><path d="M58 70V44a10 10 0 0 0-20 0v6"/><path d="M29 43l9 10 9-10"/></g></svg>`;
+
+export const SPEAKER = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 9h4l5-4.2v14.4l-5-4.2h-4z" fill="${INK}"/><path d="M15.5 9.2q1.8 2.8 0 5.6M18 6.6q3.8 5.4 0 10.8" fill="none" stroke="${INK}" stroke-width="2" stroke-linecap="round"/></svg>`;
 
 export const PAUSE_GLYPH = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h3v14H7zM14 5h3v14h-3z" fill="${INK}"/></svg>`;

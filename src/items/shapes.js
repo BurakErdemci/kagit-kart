@@ -170,6 +170,46 @@ export function blobGeometry(base, shine, shade) {
   return g;
 }
 
+// Chewed gum: a soft wad with a lobed outline, two tooth dents on top and a flat underside. `aBub` keeps
+// the unit sphere it was pressed from, so the gum material can blow the same mesh up into a bubble
+// (per instance). Creases, gores and gloss are printed by that material; the colours here only shade
+// the underside.
+export function gumGeometry() {
+  const g = smoothBall(30, 18);
+  const p = g.attributes.position;
+  g.setAttribute('aBub', new THREE.BufferAttribute(p.array.slice(), 3));
+  const v = new THREE.Vector3();
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i);
+    const a = Math.atan2(v.z, v.x);
+    const r = 1 + 0.11 * Math.sin(a * 5 + 0.7) + 0.05 * Math.sin(a * 3 - 1.2) + 0.04 * Math.sin(v.y * 5 + a * 2);
+    v.x *= r;
+    v.z *= r;
+    if (v.y > 0) {
+      // tooth dents: two shallow bites across the top
+      const bite = Math.exp(-((v.x - 0.25) ** 2 + (v.z + 0.1) ** 2) * 9) + 0.8 * Math.exp(-((v.x + 0.35) ** 2 + (v.z - 0.3) ** 2) * 10);
+      v.y *= 1 - 0.28 * bite;
+    }
+    if (v.y < -0.5) v.y = -0.5 - (v.y + 0.5) * 0.08;
+    p.setXYZ(i, v.x, v.y, v.z);
+  }
+  sheen(g, '#f55fa3', '#f55fa3', '#c8457f', new THREE.Vector3(0, 1, 0), [2, 3], 2, -0.45);
+  g.computeVertexNormals();
+  return g;
+}
+
+// Designed crease cells for the gum print: a golden-angle spiral of points on the unit sphere.
+export function gumSeeds(n = 9) {
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const y = 1 - (2 * (i + 0.5)) / n;
+    const r = Math.sqrt(1 - y * y);
+    const a = i * 2.39996 + 0.4;
+    out.push([Math.cos(a) * r, y, Math.sin(a) * r]);
+  }
+  return out;
+}
+
 // Ink drop: a teardrop with its tip along +y (the visuals point the tip against the drop's motion).
 export function dropGeometry() {
   const prof = [];
@@ -350,30 +390,34 @@ export function discGeometry() {
 }
 
 // --------------------------------------------------------------------------------------------
-// Gold-foil candy wrapper around a kart: a crinkled capsule along z with twisted, flared ends. It wraps
-// the hull only (y ≈ 0.08 … 0.86, narrower than the track width) so the wheels poke out at the sides
-// and the driver's torso shows above it: the kart's outline stays readable from the chase camera.
+// Foil: the kart wrapped like a sweet in clear cellophane, twisted shut at both ends into gold-foil
+// frills. The body of the wrap encloses kart and driver (y ≈ 0.03 … 1.85) and is drawn see-through,
+// so the kart stays readable; `aEnd` is 1 on the gathered ends, which the material prints as opaque gold.
 
 export function foilShellGeometry() {
-  const SIDES = 12;
-  // [z, radius, twist] from the tail flare to the nose flare
+  const SIDES = 16;
+  // [z, radius, twist] from the tail frill to the nose frill
   const RINGS = [
-    [-1.62, 0.5, 0.9], [-1.4, 0.13, 0.55], [-1.1, 0.72, 0.1], [-0.6, 0.93, 0], [0, 0.98, 0],
-    [0.6, 0.93, 0], [1.02, 0.74, -0.1], [1.33, 0.13, -0.55], [1.56, 0.5, -0.9],
+    [-2.02, 0.5, 1.0], [-1.86, 0.15, 0.7], [-1.62, 0.36, 0.35], [-1.3, 0.8, 0.08], [-0.75, 0.97, 0],
+    [0, 1.0, 0], [0.75, 0.97, 0], [1.3, 0.8, -0.08], [1.62, 0.36, -0.35], [1.86, 0.15, -0.7], [2.02, 0.5, -1.0],
   ];
-  const SX = 0.7, SY = 0.4, CY = 0.47;
+  const END = [1, 1, 0.55, 0, 0, 0, 0, 0, 0.55, 1, 1];
+  const SX = 1.0, SY = 0.92, CY = 0.9;
   const pos = [];
+  const end = [];
   const index = [];
   for (let r = 0; r < RINGS.length; r++) {
     const [z, rad, tw] = RINGS[r];
     const flare = r === 0 || r === RINGS.length - 1;
     for (let s = 0; s < SIDES; s++) {
       const a = (s / SIDES) * Math.PI * 2 + tw;
-      let k = 1 + (hash3(r, s, 1) - 0.5) * 0.16;
-      if (flare) k *= s % 2 ? 0.62 : 1.12; // gathered foil fans out raggedly
+      let k = 1 + (hash3(r, s, 1) - 0.5) * (flare ? 0.2 : 0.07);
+      if (flare) k *= s % 2 ? 0.6 : 1.15; // gathered foil fans out raggedly
+      const sy = flare || RINGS[r][1] < 0.5 ? 0.62 : SY;
       const x = Math.cos(a) * rad * k * SX;
-      const y = Math.sin(a) * rad * k * SY + CY;
-      pos.push(x, y, z + (hash3(s, r, 2) - 0.5) * (flare ? 0.18 : 0.06));
+      const y = Math.max(0.03, Math.sin(a) * rad * k * sy + CY);
+      pos.push(x, y, z + (hash3(s, r, 2) - 0.5) * (flare ? 0.2 : 0.05));
+      end.push(END[r]);
     }
   }
   for (let r = 0; r < RINGS.length - 1; r++) {
@@ -386,8 +430,10 @@ export function foilShellGeometry() {
   // close both ragged ends
   const tail = pos.length / 3;
   pos.push(0, CY, RINGS[0][0] - 0.02);
+  end.push(1);
   const nose = tail + 1;
   pos.push(0, CY, RINGS[RINGS.length - 1][0] + 0.02);
+  end.push(1);
   const last = (RINGS.length - 1) * SIDES;
   for (let s = 0; s < SIDES; s++) {
     index.push(tail, (s + 1) % SIDES, s);
@@ -395,6 +441,7 @@ export function foilShellGeometry() {
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('aEnd', new THREE.Float32BufferAttribute(end, 1));
   g.setIndex(index);
   g.computeVertexNormals();
   return g;

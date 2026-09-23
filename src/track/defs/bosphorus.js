@@ -67,11 +67,13 @@ export default {
     { t: P.t('row3'), count: 5 },
   ],
   ramps: [{ t: P.t('ramp'), length: 14, height: 2.5, trick: true, popup: true }],
-  shortcut: { from: P.t('hairpin', -8), to: P.t('hairpinOut', 8), side: 'right' },
+  // The pair the layout analysis reports (its first entry across the infield), which the AI drives.
+  shortcut: { from: P.t('hairpin', -25), to: P.t('hairpinOut', 7), side: 'right' },
   startT: 0,
   theme: {
     paper: '#2f3b63', ink: '#161a2e', road: '#6b7189', roadLine: '#f4e6c4',
     curbA: '#c8413b', curbB: '#f4e6c4', offroad: '#44557f', wall: '#b9a88c', desk: '#4a3322',
+    fence: { face: '#eee2c7', trim: '#c8413b', top: 'scallops' },  // a scalloped balustrade, red like the bridge
     water: '#27497a',
     skyTop: '#141b3a', skyBottom: '#e08a6a',
     fog: { color: '#3b4270', near: 150, far: 700 },

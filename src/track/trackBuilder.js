@@ -266,32 +266,73 @@ export function buildTrack(game, def) {
     track.objects.curbs = add(curbB.build(), curbMat, 'curbs');
   }
 
-  // --- walls: folded card fences, pleated like an accordion; alternate panels face the light or not --
+  // --- walls: a strip of card accordion-folded into 2 m panels standing on a glued foot tab. Valley
+  // creases (folded away from the road) print dark, mountain creases catch the light; the top edge is
+  // die-cut in the chapter's pattern with a printed trim band under the cut and the card's pale core on
+  // the cut edge. theme.fence { face, trim, back, top: 'pickets'|'scallops'|'drifts'|'flat' }.
   const wallB = new GeoBuilder({ color: 3 });
   const wallH = cfg.wallHeight;
-  const panelShade = [new THREE.Color(1, 1, 1), new THREE.Color(0.8, 0.8, 0.82)];
+  const fence = theme.fence || {};
+  const fFace = new THREE.Color(fence.face || theme.wall);
+  const fTrim = new THREE.Color(fence.trim || theme.curbA);
+  const fBack = fence.back ? new THREE.Color(fence.back) : fFace.clone().lerp(new THREE.Color(SHEET), 0.45);
+  const fCore = new THREE.Color(SHEET).lerp(new THREE.Color('#ffffff'), 0.4);
+  const fValley = fFace.clone().lerp(new THREE.Color(theme.ink), 0.5);
+  const fMountain = fFace.clone().lerp(new THREE.Color('#ffffff'), 0.55);
+  const fTab = fFace.clone().lerp(new THREE.Color(theme.ink), 0.12);
+  const PLEAT = 0.42, TRIM = 0.2, CARD = 0.06, TAB = 0.35, CREASE = 0.025;
+  // Top-edge cut: extra height at x = panel index + along-panel fraction (continuous across panels).
+  const CUTS = {
+    pickets: { steps: 8, h: (x) => 0.24 * (1 - Math.abs(2 * ((x * 4) % 1) - 1)) },
+    scallops: { steps: 12, h: (x) => 0.2 * Math.sin(Math.PI * ((x * 2) % 1)) },
+    drifts: { steps: 8, h: (x) => 0.13 + 0.08 * Math.sin(x * 2.8) + 0.05 * Math.sin(x * 7.3 + 1) },
+    flat: { steps: 1, h: () => 0 },
+  };
+  const cut = CUTS[fence.top] || CUTS.flat;
+  const wq = { x: 0, y: 0, z: 0 };
+  // Fence point at fractional sample f, `extra` metres out past the band edge.
+  const wallPoint = (f, side, extra) => {
+    const i0 = Math.floor(f), t = f - i0, a = idx(i0), b = idx(i0 + 1);
+    const la = side * (s.halfWidth[a] + s.offroad[a] + extra), lb = side * (s.halfWidth[b] + s.offroad[b] + extra);
+    wq.x = (s.px[a] + hxAt(a) * la) * (1 - t) + (s.px[b] + hxAt(b) * lb) * t;
+    wq.z = (s.pz[a] + hzAt(a) * la) * (1 - t) + (s.pz[b] + hzAt(b) * lb) * t;
+    wq.y = edgeY(a, side) * (1 - t) + edgeY(b, side) * t - 0.03;
+    return wq;
+  };
   for (const side of [-1, 1]) {
     const edges = side < 0 ? s.edgeLeft : s.edgeRight;
     for (const [a, b] of runs(N, (i) => edges[i] === EDGE_CODES.wall)) {
-      for (let k = 0, f = a; f < b; k++, f += 2) {
-        const ends = [f, Math.min(b, f + 2)];
-        const pleat = [(k & 1 ? 0.14 : -0.14) * (f === a ? 0 : 1), (k & 1 ? -0.14 : 0.14) * (ends[1] === b ? 0 : 1)];
-        // inner face, top cap, outer face as one folded strip (4 profile points)
-        wallB.strip(2, 4, (r, c, o) => {
-          const i = idx(ends[r]);
-          const base = s.halfWidth[i] + s.offroad[i] + pleat[r];
-          const lat = side * (c < 2 ? base : base + 0.18);
-          const y0 = edgeY(i, side) - 0.03;
-          o.x = s.px[i] + hxAt(i) * lat; o.z = s.pz[i] + hzAt(i) * lat;
-          o.y = c === 0 || c === 3 ? y0 : y0 + wallH;
-          o.u = r; o.v = c === 0 || c === 3 ? 0 : 1;
-          setCol(o.color, panelShade[k & 1]);
+      const panels = Math.max(1, Math.round((b - a) / 2));
+      // pleat offset at panel boundary j: odd boundaries fold out, the run's two ends stay on the edge
+      const pleat = (j) => (j % 2 === 1 && j < panels ? PLEAT : 0);
+      for (let k = 0; k < panels; k++) {
+        const f0 = a + ((b - a) * k) / panels, f1 = a + ((b - a) * (k + 1)) / panels;
+        const o0 = pleat(k), o1 = pleat(k + 1);
+        // yk: 0 foot, 1 trim line, 2 cut edge
+        const sheet = (u0, u1, rows, prof, col) => wallB.strip(rows, prof.length, (r, c, o) => {
+          const u = u0 + ((u1 - u0) * r) / (rows - 1);
+          const [ex, yk, lift = 0] = prof[c];
+          const p = wallPoint(f0 + (f1 - f0) * u, side, o0 + (o1 - o0) * u + ex);
+          const top = wallH + cut.h(k + u);
+          o.x = p.x; o.z = p.z;
+          o.y = p.y + lift + (yk === 0 ? 0 : yk === 1 ? top - TRIM : top);
+          o.u = u; o.v = yk / 2;
+          setCol(o.color, col);
         });
+        // Every sheet of a panel shares the same rows, so the faces meet exactly along the cut.
+        const along = cut.steps + 1;
+        // the crease a hair in front of the face, so it never fights the face for depth
+        if (k > 0) sheet(0, CREASE, 2, [[-0.015, 0], [-0.015, 1]], pleat(k) > 0 ? fValley : fMountain);
+        sheet(0, 1, along, [[0, 0], [0, 1]], fFace);
+        sheet(0, 1, along, [[0, 1], [0, 2]], fTrim);
+        sheet(0, 1, along, [[0, 2], [CARD, 2]], fCore);
+        sheet(0, 1, along, [[CARD, 2], [CARD, 0]], fBack);
+        sheet(0, 1, 2, [[0, 0, 0.012], [-TAB, 0, 0.012]], fTab);
       }
     }
   }
   if (!wallB.empty) {
-    const wallMat = mats.paper(theme.wall, { side: THREE.DoubleSide, vertexColors: true, overlay: mats.textures.rail, overlayColor: mix(theme.wall, theme.ink, 0.4) });
+    const wallMat = mats.paper('#ffffff', { side: THREE.DoubleSide, vertexColors: true });
     track.objects.walls = add(wallB.build(), wallMat, 'walls');
   } else {
     track.objects.walls = null;

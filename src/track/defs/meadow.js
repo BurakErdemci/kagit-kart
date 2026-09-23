@@ -54,11 +54,15 @@ export default {
     { t: P.t('row3'), count: 5 },
   ],
   ramps: [{ t: P.t('ramp'), length: 14, height: 2.5, trick: true, popup: true }],
-  shortcut: { from: P.t('hairpin', 7), to: P.t('hairpinOut', -7), side: 'right' },
+  // The pair the layout analysis reports (its first entry across the infield), which the AI drives.
+  shortcut: { from: P.t('hairpin', -37), to: P.t('hairpinOut', 49), side: 'right' },
   startT: 0,
   theme: {
     paper: '#f4ecd6', ink: '#2e3329', road: '#aaa59b', roadLine: '#fbf6e9',
+    // A light warm ochre wash the cream page shows through (grey read as asphalt at chase distance).
+    roadPrint: { wash: '#dccfae', warm: 0.22 },
     curbA: '#e0533d', curbB: '#fbf6e9', offroad: '#9dc76a', wall: '#e6cf9e', desk: '#7a5236',
+    fence: { face: '#f6efdc', trim: '#e0533d', top: 'pickets' },   // a picket fence cut from card
     skyTop: '#8fc9ef', skyBottom: '#fcefd0',
     fog: { color: '#f3ead3', near: 170, far: 760 },
     sun: { dir: [0.5, 0.78, 0.32], color: '#fff3d6', intensity: 2.1 },

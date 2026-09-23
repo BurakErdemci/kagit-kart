@@ -65,11 +65,14 @@ export default {
     { t: P.t('row3'), count: 5 },
   ],
   ramps: [{ t: P.t('ramp'), length: 14, height: 2.6, trick: true, popup: true }],
-  shortcut: { from: P.t('pencils', -8), to: P.t('pencilsOut', 8), side: 'right' },
+  // The first pair the layout analysis reports; it also finds a shorter one inside it
+  // (pencils -17 → pencilsOut -3) across the same infield.
+  shortcut: { from: P.t('pencils', -59), to: P.t('pencilsOut', 39), side: 'right' },
   startT: 0,
   theme: {
     paper: '#b98a5e', ink: '#2b1d16', road: '#8d8a86', roadLine: '#fffaf0',
     curbA: '#3f6fb5', curbB: '#fffaf0', offroad: '#caa27a', wall: '#c9ccd4', desk: '#5a3b28',
+    fence: { face: '#fbf7ea', trim: '#3f6fb5', top: 'flat' },      // folded index cards with a blue rule
     skyTop: '#3a2e3f', skyBottom: '#f3c98b',
     fog: { color: '#e9c89b', near: 170, far: 760 },
     sun: { dir: [-0.3, 0.85, 0.35], color: '#ffe2b0', intensity: 2.0 },

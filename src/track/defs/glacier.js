@@ -60,11 +60,15 @@ export default {
     { t: P.t('ramp'), length: 16, height: 3.4, trick: true, popup: true },
     { t: P.t('ramp2'), length: 14, height: 2.8, trick: true, popup: true },
   ],
-  shortcut: { from: P.t('sw1', -8), to: P.t('sw1Out', 8), side: 'right' },
+  // The pair the layout analysis reports (its first entry across the snowfield), which the AI drives.
+  shortcut: { from: P.t('sw1', -64), to: P.t('sw1Out', 29), side: 'right' },
   startT: 0,
   theme: {
     paper: '#f4eef0', ink: '#2c2a3f', road: '#8e95a8', roadLine: '#fdf7f2',
+    // A periwinkle ink wash: apart from the snow, never the grey of asphalt.
+    roadPrint: { wash: '#9fb0dc', warm: 0.12 },
     curbA: '#d6546a', curbB: '#fdf7f2', offroad: '#e9eef6', wall: '#c9dcee', desk: '#6d4c3d',
+    fence: { face: '#f2f6fc', trim: '#8fb3dd', top: 'drifts' },    // snow-fence card with a drifted top
     water: '#5f8fbf',
     skyTop: '#6d8fd8', skyBottom: '#ffc4c2',
     fog: { color: '#f7dfe4', near: 140, far: 640 },

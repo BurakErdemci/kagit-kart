@@ -28,7 +28,7 @@
 - **Speed classes named after paper weights**: 80 g, 120 g and 200 g.
 - **Drift boosts with three tiers**, plus slipstream, ramps with tricks, and rocket shortcuts across the infield. If you fall off the page, a paper crane carries you back.
 - **A procedural soundtrack**: a sequencer plays a theme for each chapter, the tempo rises on the final lap, and every sound effect is synthesised.
-- **Three quality levels.** All four tracks hold 60 fps on the high setting.
+- **Four quality levels and automatic resolution.** All four tracks hold 60 fps on the high setting; on weak machines the auto setting lowers the level and render resolution from measured frame time.
 
 ## Controls
 
@@ -64,6 +64,17 @@ This was written down before the first commit:
 > **An automated autopilot run finishes a 3-lap, 8-kart race on every track with 0 console errors, and the player's view renders at a mean of ≥ 60 fps** (RX 6750 XT, Chromium via Playwright).
 
 `tools/playtest.mjs` measures it and prints one JSON line per track. Races are deterministic: the same seed gives the same race, to the millisecond.
+
+A second number came from the first players: a school PC ran it at about 3 fps. `tools/scenarios/lowend.mjs` reproduces weak hardware (software rendering at desktop and phone resolutions, and a real GPU with the CPU throttled 6x):
+
+| Setup | Before | After |
+|---|---|---|
+| Software rendering, 1366x768, race | 2.6 fps | 19-20 fps |
+| Software rendering, 1366x768, title | 3.3 fps | 60 fps |
+| Software rendering, phone pixels, race | 2.9 fps | 20-22 fps |
+| Real GPU, CPU x6, phone pixels, race | 54 fps | 53-55 fps |
+
+With software rendering the game also shows a note about turning on the browser's hardware acceleration.
 
 ## Run locally
 

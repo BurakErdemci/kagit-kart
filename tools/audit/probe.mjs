@@ -1,6 +1,9 @@
 // Audit probe runner: boots the game from AUDIT_ROOT in a real-GPU browser and runs one scenario.
 //   node tools/audit/probe.mjs <scenario.mjs>
 // The scenario's default export is async ({ page, root, errors, sleep }) => ({ live, detail }).
+// Optional exports: `setup({ page, root, errors, sleep })` runs before the page loads (routes, init
+// scripts, seeded storage); `options = { boot: false }` skips waiting for __kk.ready, for probes about
+// a boot that fails; `options.viewport` overrides 1280x720.
 // Exit codes follow the audit finding contract: 1 the flaw reproduces, 0 it does not, 2 inconclusive
 // (the game did not boot, the scenario threw, or it ran out of time).
 // Needs network (three.js comes from jsdelivr) and Playwright, so audit lanes write probes against it
@@ -32,20 +35,25 @@ function cleanup() {
 
 try {
   const { launch } = await import(pathToFileURL(path.join(root, 'tools', 'pw.mjs')).href);
-  const scenario = (await import(pathToFileURL(path.resolve(scenarioPath)).href)).default;
+  const mod = await import(pathToFileURL(path.resolve(scenarioPath)).href);
+  const options = mod.options || {};
   await sleep(1200);
   ({ browser } = await launch({}));
-  const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  const page = await browser.newPage({ viewport: options.viewport || { width: 1280, height: 720 } });
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e && e.stack || e)));
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  const ctx = { page, root, errors, sleep };
+  if (mod.setup) await mod.setup(ctx);
   await page.goto(`http://127.0.0.1:${port}/`);
-  try {
-    await page.waitForFunction(() => window.__kk && window.__kk.ready, null, { timeout: 30_000 });
-  } catch {
-    throw Object.assign(new Error(`game did not boot; errors: ${errors.slice(0, 3).join(' | ')}`), { inconclusive: true });
+  if (options.boot !== false) {
+    try {
+      await page.waitForFunction(() => window.__kk && window.__kk.ready, null, { timeout: 30_000 });
+    } catch {
+      throw Object.assign(new Error(`game did not boot; errors: ${errors.slice(0, 3).join(' | ')}`), { inconclusive: true });
+    }
   }
-  const result = await scenario({ page, root, errors, sleep });
+  const result = await mod.default(ctx);
   console.log(`${result.live ? 'LIVE' : 'not reproduced'}: ${result.detail || ''}`);
   await browser.close();
   cleanup();

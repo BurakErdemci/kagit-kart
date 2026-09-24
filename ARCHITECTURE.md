@@ -821,3 +821,11 @@ answers to it:
 - Intro flyovers pick a low path over the densest scenery stretch, ray-tested against overhead structures, cached per track. They read scenery's runtime `popups.types`/`group` and `track.objects.startLine` (guarded; fallback is the old ramp route).
 - Default mode is Grand Prix: `startRace({})` without a mode starts GP. Tests pass the mode explicitly.
 - Scenery: `standingOK` rejects the void strip; fences use `theme.fence` (not `theme.wall`); `Parts.strip` places each strip at its own position.
+
+### 19.5 Audit pass (24 Sep; binding over §5-§7, §13 and §19.1 where they differ)
+- New phase `'setup'`: `startRace` enters it synchronously before any await; it is in neither STEP nor PAUSE phases, the UI shows no board in it, and `startRace`/`startGP`/`nextRace`/`restartRace` ignore calls while in it (they return the pending setup). A throw during setup returns to the title.
+- Boot failures are visible: a classic inline script in index.html turns a module load/parse error into "Oyun yüklenemedi…" on the boot card; `boot()` runs in try/catch and shows "Oyun başlatılamadı: …". `ResizeObserver` is optional.
+- WebGL context loss: `webglcontextlost` pauses (in PAUSE phases) and sets `game.contextLost`, which also blocks `shouldStep`; restore clears it and leaves the game paused. The teardown leak check skips GPU counts for a race that saw a loss.
+- Persisted data is sanitized on read: `readSettings` keeps a field only with the default's type and domain; `readTTRecord` (the one reader of `tt:*`, also behind `api.getBest`) drops non-positive times and malformed ghosts.
+- `storage.set` on a quota error strips `ghost` payloads from `kk1:tt:*` (largest first, times kept) and retries; it returns whether the write landed.
+- Regression suite: `node tools/audit/regress.mjs` (scenarios in tools/audit/regressions/, runner tools/audit/probe.mjs; needs network and Playwright).

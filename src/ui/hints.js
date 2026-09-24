@@ -1,4 +1,5 @@
-// Teaching: the first-race controls card and one-time contextual hints (each shown once ever).
+// Teaching: the first-race controls card and one-time contextual hints (each shown once ever), plus the
+// hardware-acceleration note on the title and menus (sysEl, above the menus) until the player closes it.
 import { h, svg, lt } from './dom.js';
 import { sheet } from './menus.js';
 import { controlRows } from './forms.js';
@@ -23,6 +24,8 @@ export function createHints(ctx) {
   let teachLeft = 0;
   let race = null; // { turn: Float32Array, n, length, ramps: [t] }
   let seen = ctx.store.get('uiHints', {}) || {};
+  const sysEl = h('div', { class: 'kk-layer' });
+  let hw = null;
 
   function once(key) {
     if (seen[key] || queue.includes(key) || current?.key === key) return;
@@ -37,6 +40,28 @@ export function createHints(ctx) {
     el.appendChild(note);
     ctx.glyphs(note);
     current = { key, el: note, t: key === 'portrait' ? 4.5 : 3.8 };
+  }
+
+  function closeHw(e) {
+    e?.stopPropagation();
+    if (!hw) return;
+    hw.remove();
+    hw = null;
+    seen = { ...seen, hwaccel: true };
+    ctx.store.set('uiHints', seen);
+    ctx.click();
+  }
+
+  function updateHw(view) {
+    const want = !!game.renderer?.software && !seen.hwaccel && (view === 'title' || view.startsWith('menu:'));
+    if (want === !!hw) return;
+    if (!want) { hw.remove(); hw = null; return; }
+    hw = h('div', { class: 'kk-hw', 'data-kk-hint': 'hwaccel', role: 'note', onclick: closeHw }, h('div', { class: 'kk-hint-in' },
+      sheet([
+        h('span', null, 'Tarayıcında donanım hızlandırma kapalı görünüyor. Açarsan oyun çok daha akıcı olur (Ayarlar › Sistem › Donanım hızlandırma).'),
+        h('button', { class: 'kk-hw-x', 'aria-label': 'Kapat', onclick: closeHw }, '×'),
+      ], { dk: 2 })));
+    sysEl.appendChild(hw);
   }
 
   function bind({ track, def }) {
@@ -81,12 +106,13 @@ export function createHints(ctx) {
   }
 
   return {
-    el, bind, unbind,
+    el, sysEl, bind, unbind,
     onCountdown({ n }) { if (n === 3) openTeach(); },
     onDrift({ kart, state, tier }) { if (kart === game.player && state === 'tier' && tier === 1) once('tier'); },
     onItemGet({ kart }) { if (kart === game.player) once('item'); },
 
     update(dt, view) {
+      updateHw(view);
       if (current && view !== 'race' && current.key !== 'portrait') { current.el.remove(); current = null; }
       if (game.touch && innerHeight > innerWidth * 1.1) once('portrait');
       if (teach) {

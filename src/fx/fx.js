@@ -535,7 +535,7 @@ export function createFX(game) {
     time += dt;
     bits.setTime(time);
     const q = game.quality;
-    qMul = q === 'low' ? 0.5 : q === 'medium' ? 0.75 : 1;
+    qMul = q === 'low' || q === 'minimal' ? 0.5 : q === 'medium' ? 0.75 : 1;
 
     const r = game.renderer;
     bits.uniforms.uSunDir.value.subVectors(r.sun.position, r.sun.target.position).normalize();

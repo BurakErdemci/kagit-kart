@@ -450,6 +450,10 @@ ${dkFine}
 .kk-hint .kk-rot{width:2.2em; height:2.2em}
 .kk-hint-in{animation:kk-popup .5s cubic-bezier(.25,.8,.3,1) both; transform-origin:50% 100%}
 .kk-rm .kk-hint-in{animation:none}
+/* software rendering: one small closable slip, top right on the title and menus */
+.kk-hw{position:absolute; right:calc(1em + var(--sar)); top:calc(.8em + var(--sat)); rotate:1deg; max-width:min(24em, calc(100% - 2em)); pointer-events:auto; cursor:pointer}
+.kk-hw .kk-paper{padding:.55em .8em .6em 1em; font-weight:700; font-size:.85em; line-height:1.3; display:flex; gap:.6em; align-items:flex-start}
+.kk-hw-x{flex:none; font:800 1.3em/1 var(--fb); color:var(--ink); background:none; border:0; padding:0 .1em; cursor:pointer}
 .kk-teach{position:absolute; right:calc(2em + var(--sar)); top:50%; translate:0 -50%; rotate:1.4deg; width:25em}
 .kk-teach .kk-paper{padding:1em 1.3em 1.2em}
 .kk-teach .kk-h{font-size:1.7em; margin-bottom:.4em}

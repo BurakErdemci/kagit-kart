@@ -10,7 +10,7 @@ export const SETTING_ROWS = [
   { key: 'musicVolume', label: 'Müzik', type: 'range' },
   { key: 'sfxVolume', label: 'Efektler', type: 'range' },
   { key: 'muted', label: 'Ses', type: 'mute', options: [[false, 'Açık'], [true, 'Kapalı']] },
-  { key: 'quality', label: 'Görüntü', options: [['auto', 'Otomatik'], ['high', 'Yüksek'], ['medium', 'Orta'], ['low', 'Düşük']] },
+  { key: 'quality', label: 'Görüntü', options: [['auto', 'Otomatik'], ['high', 'Yüksek'], ['medium', 'Orta'], ['low', 'Düşük'], ['minimal', 'En düşük']] },
   { key: 'reducedMotion', label: 'Hareketi azalt', options: [['auto', 'Sistem'], ['on', 'Açık'], ['off', 'Kapalı']] },
   { key: 'cameraShake', label: 'Kamera sarsıntısı', options: ON_OFF },
   { key: 'touchControls', label: 'Dokunmatik tuşlar', options: [['auto', 'Otomatik'], ['on', 'Açık'], ['off', 'Kapalı']] },

@@ -216,22 +216,38 @@ export const config = {
   },
 
   render: {
-    shadowSize: { high: 2048, medium: 1024, low: 0 },
+    shadowSize: { high: 2048, medium: 1024, low: 0, minimal: 0 },
     // Half-size of the sun's ortho frustum; its centre sits shadowLead m ahead along the view, so the
     // 2048 map spends its texels where the camera looks (3.9 cm texels instead of 5.4 at 55 m).
     shadowExtent: 40,
     shadowLead: 16,
     outlinePx: 1, // ink outline tap offset (whole px) at 720 px of render height; scales with resolution
     shadowDistance: 120,
-    pixelCap: { high: 2.4e6, medium: 1.4e6, low: 0.9e6 },
+    pixelCap: { high: 2.4e6, medium: 1.4e6, low: 0.9e6, minimal: 0.25e6 },
     dotPx: 6,
     gradient: [0.38, 0.7, 1.0], // three toon bands
   },
 
+  // Auto quality (src/render/autoQuality.js). Frame times are wall-clock ms; factors apply to 1000 / targetFps.
   quality: {
-    measureTime: 1.0,
-    window: 3.0,
-    slowFactor: 1.2,
+    targetFps: 55,
+    window: 0.6, // s of frames per evaluation, and at least minFrames of them
+    minFrames: 3,
+    skipFrames: 3, // after a phase or quality change (allocations, program compiles) ...
+    skipTime: 1.0, // ... and s after a quality change
+    maxFrameMs: 1500, // longer gaps are a hidden tab or a stall, not a frame
+    dropFactor: 1.12,
+    raiseFactor: 0.97,
+    margin: 0.9, // a drop aims this far under the measured budget: not all of the cost is pixels
+    raiseStep: 1.12, // linear scale per raise (+25 % pixels)
+    raiseHold: 3, // s of headroom before a raise; doubles after each raise taken back
+    raiseHoldMax: 40,
+    probeWindows: 3,
+    noGain: 0.93, // a drop that leaves the frame time above this share is undone ...
+    unblock: 1.3, // ... and drops wait until the frame time grows by this factor
+    scaleFloor: { high: 0.7, medium: 0.7, low: 0.7, minimal: 0.5 },
+    // relative cost per pixel: MSAA and the 2048 shadow map on high, the outline pass above minimal
+    levelCost: { high: 1, medium: 0.8, low: 0.6, minimal: 0.45 },
   },
 
   settingsDefaults: {

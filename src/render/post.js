@@ -1,5 +1,7 @@
 // Scene → one render target (with depth texture) → one full-screen pass: depth-discontinuity ink
-// outlines, paper grain multiply, slight vignette. Off on low quality.
+// outlines, paper grain multiply, slight vignette. On at every level, so the canvas never needs MSAA and
+// the scene's programs (keyed by the bound target) do not depend on the level. The outlines stay on 'minimal' too: at its render sizes they cost nothing measurable
+// under software rendering (tools/scenarios/lowend.mjs), and without them it stops reading as ink on paper.
 import * as THREE from 'three';
 
 const VERT = /* glsl */`
@@ -69,7 +71,6 @@ export function createPost(renderer, materials, cfg) {
   const hasFloat = renderer.extensions.has('EXT_color_buffer_float');
   let rt = null;
   let samples = 0;
-  let enabled = true;
   let width = 1, height = 1, pr = 1;
 
   const mat = new THREE.ShaderMaterial({
@@ -112,14 +113,12 @@ export function createPost(renderer, materials, cfg) {
     mat.uniforms.uThick.value = Math.max(1, Math.round(outlinePx * (h * pr) / 720));
     const rw = Math.max(1, Math.round(w * pr)), rh = Math.max(1, Math.round(h * pr));
     mat.uniforms.uMis.value.set(mat.uniforms.uThick.value / rw, -mat.uniforms.uThick.value / rh);
-    if (enabled) makeTarget();
+    makeTarget();
   }
 
+  // Takes effect with the next setSize (renderer.setQuality resizes right after).
   function setQuality(level) {
-    enabled = level !== 'low';
     samples = level === 'high' ? 4 : 0;
-    if (enabled) makeTarget();
-    else if (rt) { rt.depthTexture?.dispose(); rt.dispose(); rt = null; }
   }
 
   function setInk(color) {
@@ -129,7 +128,7 @@ export function createPost(renderer, materials, cfg) {
   function render(scene, camera) {
     mat.uniforms.uNear.value = camera.near;
     mat.uniforms.uFar.value = camera.far;
-    if (!enabled || !rt) {
+    if (!rt) {
       renderer.setRenderTarget(null);
       renderer.render(scene, camera);
       return;
@@ -142,7 +141,7 @@ export function createPost(renderer, materials, cfg) {
 
   return {
     render, setSize, setQuality, setInk, material: mat,
-    get enabled() { return enabled; },
+    enabled: true,
     get target() { return rt; },
   };
 }

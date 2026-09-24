@@ -10,6 +10,7 @@ import { createRenderer } from './render/renderer.js';
 import { createMaterials } from './render/materials.js';
 import { createPost } from './render/post.js';
 import { createCameraRig } from './render/camera.js';
+import { createAutoQuality } from './render/autoQuality.js';
 import { buildTrack } from './track/trackBuilder.js';
 import { CUP, TRACKS } from './track/defs/index.js';
 import { Kart } from './kart/kart.js';
@@ -31,7 +32,7 @@ document.documentElement.lang = 'tr';
 // 'setup' (startRace until intro) neither steps nor pauses, and every race entry ignores calls in it.
 const STEP_PHASES = new Set(['countdown', 'race', 'finishing', 'results']);
 const PAUSE_PHASES = new Set(['intro', 'countdown', 'race', 'finishing', 'results']);
-const QUALITY_LEVELS = ['high', 'medium', 'low'];
+const QUALITY_LEVELS = ['high', 'medium', 'low', 'minimal'];
 const SETTING_CHOICES = {
   quality: ['auto', ...QUALITY_LEVELS],
   reducedMotion: ['auto', 'on', 'off'],
@@ -105,27 +106,44 @@ function resolveTouch() {
   return coarse || sawTouch;
 }
 
-// Level auto has dropped to this session (null until the first drop).
-let autoLevel = null;
-
-function resolveQuality() {
-  const q = game.settings.quality;
-  if (QUALITY_LEVELS.includes(q)) return q;
-  if (autoLevel) return autoLevel;
+// The best level auto uses: its start on hardware, and never exceeded.
+function autoCeiling() {
   let coarse = false;
   try { coarse = window.matchMedia('(pointer: coarse)').matches; } catch { /* default */ }
   return coarse ? 'medium' : 'high';
 }
 
-function applyQuality(level) {
-  // Render targets and the shadow map appear or change size: this race's GPU counts are not comparable.
-  if (game.track) qualityChangedDuringRace = true;
-  game.quality = level;
-  game.renderer.setQuality(level);
-  game.post.setQuality(level);
-  game.renderer.resize();
-  events.emit('quality', { level });
+// Applies settings.quality. A fixed level renders at scale 1; auto starts where it last settled.
+function resolveQuality() {
+  const q = game.settings.quality;
+  if (QUALITY_LEVELS.includes(q)) {
+    autoQuality.stop();
+    applyQuality(q, 1);
+  } else if (autoQuality.active) {
+    applyQuality(autoQuality.level, autoQuality.scale);
+  } else {
+    // A software rasteriser gets the lowest level from the first frame and is never raised into the
+    // shadowed levels, whose program recompile alone stalls it for seconds.
+    const soft = game.renderer.software;
+    autoQuality.start(soft ? 'minimal' : autoCeiling(), soft ? 'low' : autoCeiling());
+  }
 }
+
+function applyQuality(level, scale) {
+  // Render targets and the shadow map appear or change size: this race's GPU counts are not comparable.
+  if (game.track && (level !== game.quality || scale !== game.renderer.renderScale)) qualityChangedDuringRace = true;
+  const changed = level !== game.quality;
+  game.quality = level;
+  game.post.setQuality(level);
+  game.renderer.setQuality(level, scale); // resizes, which rebuilds post's target
+  if (changed) events.emit('quality', { level });
+}
+
+const autoQuality = createAutoQuality(game, {
+  levels: QUALITY_LEVELS,
+  apply: (level, scale) => { game.qualityAuto = true; applyQuality(level, scale); },
+});
+game.autoQuality = autoQuality;
 
 // ---------------------------------------------------------------------------------------------
 // phases
@@ -379,10 +397,10 @@ async function setupRace(o, token) {
   // 6.
   try {
     // Programs are keyed by the bound target's colour space: compile for the target the race renders
-    // into (post's linear target on high/medium), or every hidden item/FX program recompiles mid-race.
+    // into (post's linear target at every level), or every hidden item/FX program recompiles mid-race.
     const r = game.renderer;
     const prevTarget = r.getRenderTarget();
-    r.setRenderTarget(game.post.enabled ? game.post.target : null);
+    r.setRenderTarget(game.post.target);
     let compiling;
     try { compiling = r.compileAsync(game.scene, game.camera); } finally { r.setRenderTarget(prevTarget); }
     await compiling;
@@ -549,7 +567,7 @@ function setSetting(key, value) {
   storage.set('settings', game.settings);
   if (key === 'quality') {
     game.qualityAuto = value === 'auto';
-    applyQuality(resolveQuality());
+    resolveQuality();
   }
   if (key === 'reducedMotion') game.reducedMotion = resolveReducedMotion();
   if (key === 'touchControls') game.touch = resolveTouch();
@@ -606,45 +624,6 @@ function stepSim(dt) {
 // per frame
 
 const perf = { frames: [], lastCalls: 0, lastShadowCalls: 0, lastTriangles: 0 };
-const quality = { samples: [], measuring: true, measureStart: 0, interval: 1000 / 60, windowStart: 0, windowFrames: 0, windowTime: 0 };
-
-function autoQuality(now, dtMs) {
-  if (game.settings.quality !== 'auto') return;
-  const phase = game.phase;
-  if (phase === 'title' || phase === 'menu') {
-    if (quality.measuring) {
-      if (!quality.measureStart) quality.measureStart = now;
-      if (dtMs > 0 && dtMs < 200) quality.samples.push(dtMs);
-      if (now - quality.measureStart > config.quality.measureTime * 1000 && quality.samples.length > 10) {
-        const s = quality.samples.slice().sort((a, b) => a - b);
-        quality.interval = s[Math.floor(s.length / 2)];
-        quality.measuring = false;
-      }
-    }
-    return;
-  }
-  if (phase !== 'race' || game.paused) { quality.windowStart = 0; return; }
-  if (!quality.windowStart) { quality.windowStart = now; quality.windowFrames = 0; quality.windowTime = 0; return; }
-  quality.windowFrames++;
-  quality.windowTime += dtMs;
-  if (now - quality.windowStart >= config.quality.window * 1000) {
-    const mean = quality.windowTime / Math.max(1, quality.windowFrames);
-    // Never drop while the game holds ~60 fps, whatever rAF cadence the display reports.
-    const slow = mean > config.quality.slowFactor * Math.max(quality.interval, 1000 / 144) && mean > 1000 / 57;
-    if (slow) {
-      const i = QUALITY_LEVELS.indexOf(game.quality);
-      if (i >= 0 && i < QUALITY_LEVELS.length - 1) {
-        game.qualityAuto = true;
-        autoLevel = QUALITY_LEVELS[i + 1];
-        applyQuality(autoLevel);
-      }
-    }
-    quality.windowStart = now;
-    quality.windowFrames = 0;
-    quality.windowTime = 0;
-  }
-}
-
 // The pause key only opens the pause menu. Closing it (Devam, back at the pause root) is UI's call
 // through api.setPaused(false), so Esc inside a pause sub-screen never unpauses the race beneath it.
 function handleGlobalKeys() {
@@ -668,7 +647,7 @@ function frame(dt, alpha, now) {
   game.time += dt;
   const fdt = game.paused ? 0 : dt;
   visualTime += fdt;
-  autoQuality(now, dt * 1000);
+  autoQuality.frame(now);
 
   const a = shouldStep() ? alpha : 1;
   for (const k of game.karts) {
@@ -782,7 +761,10 @@ function boot() {
   game.cameraRig = createCameraRig(game, game.camera);
   game.input = createInput(game);
   renderer.setTheme(BOOK_THEME);
-  applyQuality(resolveQuality());
+  resolveQuality();
+  // The one exception to a fixed choice: on a software rasteriser this session starts at the lowest level
+  // (settings keep the choice, and picking a level again applies it).
+  if (renderer.software && game.quality !== 'minimal') applyQuality('minimal', 1);
 
   game.camera.position.set(0, 4, -10);
   game.camera.lookAt(0, 1, 0);

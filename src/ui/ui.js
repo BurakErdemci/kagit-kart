@@ -103,7 +103,7 @@ export function createUI(game) {
   const canSound = !!(window.AudioContext || window.webkitAudioContext);
   let lockedFor = 0;
   // Hints sit under the HUD: a threat marker or a banner must never hide behind a teaching note.
-  root.append(hud.inkEl, hints.el, hudLayer, touch.el, menus.layer, introLayer, results.el, podium.el, menus.coverWrap, pause.el, fpsEl, soundEl);
+  root.append(hud.inkEl, hints.el, hudLayer, touch.el, menus.layer, introLayer, results.el, podium.el, menus.coverWrap, hints.sysEl, pause.el, fpsEl, soundEl);
   touch.bindSlot(hud.slot);
   hudLayer.hidden = true;
   pause.el.hidden = true;

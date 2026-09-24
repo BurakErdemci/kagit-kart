@@ -1,5 +1,6 @@
-// game.renderer IS the THREE.WebGLRenderer, extended with: setTheme, sunTarget, sun, ambient, sky,
-// theme, quality, setQuality, resize, updateWorld(camera). info.autoReset is off: core resets per frame
+// game.renderer IS the THREE.WebGLRenderer, extended with: setTheme, sunTarget, sun, ambient, sky, theme,
+// quality, setQuality(level, scale), renderScale, levelPixels(level), software, gpuName, resize,
+// updateWorld(camera). info.autoReset is off: core resets per frame
 // so renderer.info.render covers the shadow pass, the scene and the post quad together.
 import * as THREE from 'three';
 import { BOOK_THEME } from '../core/config.js';
@@ -44,7 +45,9 @@ void main() {
 
 export function createRenderer(game, container) {
   const { config } = game;
-  const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', stencil: false });
+  // No MSAA on the canvas: every frame reaches it as post's one full-screen pass, which MSAA cannot
+  // change; the scene's MSAA lives on post's target ('high').
+  const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance', stencil: false });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.NoToneMapping;
   renderer.shadowMap.enabled = true;
@@ -189,10 +192,14 @@ export function createRenderer(game, container) {
   }
 
   let quality = 'high';
-  function setQuality(level) {
+  let renderScale = 1;
+  // scale: auto quality's dynamic resolution, a linear factor on the level's pixel ratio.
+  function setQuality(level, scale = 1) {
     const prevShadows = renderer.shadowMap.enabled;
     quality = level;
     renderer.quality = level;
+    renderScale = scale;
+    renderer.renderScale = scale;
     const size = config.render.shadowSize[level] || 0;
     renderer.shadowMap.enabled = size > 0;
     sun.castShadow = size > 0;
@@ -210,11 +217,19 @@ export function createRenderer(game, container) {
     resize();
   }
 
+  const levelRatio = (level, w, h) => Math.min(window.devicePixelRatio || 1,
+    Math.sqrt((config.render.pixelCap[level] || config.render.pixelCap.high) / (w * h)));
+
+  // Drawing-buffer pixels a level renders at render scale 1.
+  function levelPixels(level) {
+    const w = Math.max(1, container.clientWidth), h = Math.max(1, container.clientHeight);
+    return w * h * levelRatio(level, w, h) ** 2;
+  }
+
   function resize() {
     const w = Math.max(1, container.clientWidth);
     const h = Math.max(1, container.clientHeight);
-    const cap = config.render.pixelCap[quality] || config.render.pixelCap.high;
-    const pr = Math.max(0.5, Math.min(window.devicePixelRatio || 1, Math.sqrt(cap / (w * h))));
+    const pr = Math.max(0.25, levelRatio(quality, w, h) * renderScale);
     renderer.setPixelRatio(pr);
     renderer.setSize(w, h, false);
     camera.aspect = w / h;
@@ -225,9 +240,18 @@ export function createRenderer(game, container) {
     renderer.cssHeight = h;
   }
 
+  // A software rasteriser (hardware acceleration off, no usable GPU driver) runs a few fps at 1 MP.
+  let gpuName = '';
+  try {
+    const gl = renderer.getContext();
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    gpuName = String((ext && gl.getParameter(ext.UNMASKED_RENDERER_WEBGL)) || gl.getParameter(gl.RENDERER) || '');
+  } catch { /* unknown renderer: treat as hardware */ }
+
   Object.assign(renderer, {
-    scene, camera, sun, ambient, sky, sunTarget, setTheme, setQuality, resize, updateWorld, warmShadows,
-    theme: BOOK_THEME, quality,
+    scene, camera, sun, ambient, sky, sunTarget, setTheme, setQuality, levelPixels, resize, updateWorld, warmShadows,
+    theme: BOOK_THEME, quality, renderScale, gpuName,
+    software: /SwiftShader|llvmpipe|softpipe|Software|Basic Render/i.test(gpuName),
   });
   setTheme(BOOK_THEME);
   return renderer;

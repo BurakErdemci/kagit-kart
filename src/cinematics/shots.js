@@ -3,6 +3,7 @@
 // promise while the shot keeps holding; ctx.end() resolves it and hands the camera back.
 import * as THREE from 'three';
 import { createKeyPath, dirOf, easeInOut, easeInOutSine, easeOut, fitVfov, frameAt, vfovFromHfov } from './campath.js';
+import { CUP } from '../track/defs/index.js';
 import { DISC } from './stage.js';
 import { PODIUM } from './podium.js';
 
@@ -15,54 +16,103 @@ function orbitPoint(center, az, el, dist, out) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// title: the open book on the desk at golden hour, the kart parked on the turntable, a slow orbit
+// title: the closed book on the desk at golden hour. The first key or tap opens its cover, the pages'
+// pop-ups rise and the camera settles on the open spread the menus sit under (a slow orbit).
 
 const TITLE_FOCUS = new THREE.Vector3(3.0, 2.7, -1.4);
 const TITLE_AZ = 0.3;
+const CLOSED_FOCUS = new THREE.Vector3(6.25, 1.5, 0.5);
+const CAM_OPEN = 1.7, CAM_CLOSE = 1.9;
+const HERO_AFTER_OPEN = 1.0;
 
 export function titleShot(ctx) {
   const { game } = ctx;
   const stage = ctx.stage();
+  const rm = () => !!game.reducedMotion;
   const parkYaw = TITLE_AZ + 0.95;
+  const heroId = () => game.selection?.characterId || 'tilki';
+  const isTitle = (s) => (s || 'title') === 'title';
+  let screen = game.menuScreen || 'title';
   stage.setMode('title');
   stage.setSpin(0);
   stage.park(parkYaw);
-  stage.setHero(game.selection?.characterId || 'tilki', { animate: !!stage.currentHero(), faceYaw: parkYaw });
-  const anyUp = stage.placed.some((p) => p.target > 0);
-  if (!anyUp) stage.unfold({ delay: 0.45, snap: !!game.reducedMotion });
-  let screen = game.menuScreen || 'title';
-  let refold = -1;
+  stage.showChapter(game.selection?.trackId, { animate: false });
+  // cam: 0 frames the closed book, 1 the open spread; eased on the way
+  let cam = isTitle(screen) ? 0 : 1, camFrom = cam, camTo = cam, camT = 1, camDur = 1;
+  if (isTitle(screen)) {
+    const snap = !ctx.fromStage || rm();
+    stage.setBook('closed', { snap });
+    stage.setDeskKart(heroId(), true, { snap, delay: snap ? 0 : 1.3 });
+  } else {
+    stage.setDeskKart(null, false, { snap: true });
+    stage.setBook('open', { snap: stage.book === 'closed' });
+    stage.setHero(heroId(), { animate: !!stage.currentHero(), faceYaw: parkYaw });
+    if (!stage.placed.some((p) => p.target > 0)) stage.unfold({ delay: 0.45, snap: rm() });
+  }
   let t = 0;
+  const moveCam = (to, dur) => {
+    if (camTo === to) return;
+    camFrom = cam; camTo = to; camT = 0;
+    camDur = rm() ? 0 : dur * Math.abs(to - cam);
+  };
 
+  // The kart parked by the book folds down as the cover opens and rises on the turntable once the
+  // spread is up; closing the book brings it back to the desk.
+  function openBook() {
+    stage.setBook('open');
+    stage.unfold({ from: 0, delay: 0.05 });
+    stage.setDeskKart(heroId(), false);
+    stage.setHero(heroId(), { animate: true, faceYaw: parkYaw, delay: rm() ? 0 : HERO_AFTER_OPEN });
+    moveCam(1, CAM_OPEN);
+  }
+
+  function closeBook() {
+    stage.setBook('closed');
+    stage.setDeskKart(heroId(), true, { delay: rm() ? 0 : 1.3 });
+    moveCam(0, CAM_CLOSE);
+  }
+
+  const a = { focus: new THREE.Vector3(), az: 0, el: 0, dist: 0, vfov: 0, sx: 0, sy: 0 };
   return {
     stageMode: 'title',
     blendIn: 1.3,
     update(dt) {
       t += dt;
-      if (refold > 0) {
-        refold -= dt;
-        if (refold <= 0) stage.unfold({ delay: 0 });
-      }
+      if (camT < camDur) camT += dt;
+      const k = camDur > 0 ? Math.min(1, camT / camDur) : 1;
+      cam = camFrom + (camTo - camFrom) * easeInOutSine(k);
     },
     onMenu(e) {
       const next = e.screen || 'title';
-      // The UI's cover swings open over this shot: the pop-ups rise with it; closing folds them.
-      // With reduced motion the cover simply cuts away, so the page is shown already standing.
-      if (game.reducedMotion) { stage.unfold({ snap: true }); refold = -1; }
-      else if (screen === 'title' && next !== 'title') { stage.unfold({ from: 0, delay: 0.15 }); refold = -1; }
-      else if (screen !== 'title' && next === 'title') { stage.fold(); refold = 1.8; }
+      if (isTitle(screen) && !isTitle(next)) openBook();
+      else if (!isTitle(screen) && isTitle(next)) closeBook();
+      if (next === 'track' && e.trackId) stage.showChapter(e.trackId, { animate: !rm() });
       screen = next;
     },
     pose(out) {
-      const rm = !!game.reducedMotion;
-      const period = rm ? 110 : 64, amp = rm ? 0.22 : 0.42;
-      const az = TITLE_AZ + Math.sin((t / period) * Math.PI * 2) * amp;
-      const el = 0.19 + Math.sin((t / period) * Math.PI * 2 + 1.1) * (rm ? 0.01 : 0.02);
-      orbitPoint(TITLE_FOCUS, az, el, 28, out.pos);
+      const reduced = rm();
       const aspect = game.camera.aspect || 1.6;
-      out.vfov = fitVfov(aspect, 31, 56);
-      // Book in the upper half: menu cards cover the lower ~45 % of the screen.
-      frameAt(out.pos, TITLE_FOCUS, 0, 0.24, out.vfov, aspect, out.look);
+      // open: the spread in the upper half (menu cards cover the lower ~45 % of the screen), slow orbit
+      const period = reduced ? 110 : 64, amp = reduced ? 0.22 : 0.42;
+      const azO = TITLE_AZ + Math.sin((t / period) * Math.PI * 2) * amp;
+      const elO = 0.19 + Math.sin((t / period) * Math.PI * 2 + 1.1) * (reduced ? 0.01 : 0.02);
+      // closed: looking down on the cover, a little from the fore-edge side so the page block shows;
+      // narrow screens step back so the whole book stays in frame
+      // a phone held upright is as narrow as the cover: come closer, more from the front, look down more steeply
+      const narrow = Math.min(1, Math.max(0, (1.25 - aspect) / 0.8));
+      const azC = 0.2 - 0.12 * narrow + Math.sin((t / 40) * Math.PI * 2) * (reduced ? 0.01 : 0.035);
+      const distC = 30.5 - 6.5 * narrow;
+      const elC = 0.8 + 0.22 * narrow;
+      const k = cam, kk = k * k * (3 - 2 * k);
+      a.focus.lerpVectors(CLOSED_FOCUS, TITLE_FOCUS, kk);
+      a.az = azC + (azO - azC) * k;
+      a.el = elC + (elO - elC) * k;
+      a.dist = distC + (28 - distC) * k;
+      a.vfov = fitVfov(aspect, 32, 44) * (1 - k) + fitVfov(aspect, 31, 56) * k;
+      a.sy = (aspect < 1 ? 0.12 : 0.08) * (1 - k) + 0.24 * k;
+      orbitPoint(a.focus, a.az, a.el, a.dist, out.pos);
+      out.vfov = a.vfov;
+      frameAt(out.pos, a.focus, 0, a.sy, out.vfov, aspect, out.look);
     },
   };
 }
@@ -76,6 +126,8 @@ export function selectShot(ctx, opts) {
   const { game } = ctx;
   const stage = ctx.stage();
   stage.setMode('select');
+  // normally the title has opened the book already; a shut one (a direct jump here) opens at once
+  stage.setBook('open', { snap: stage.book === 'closed' });
   const rm = () => !!game.reducedMotion;
   const face = () => SELECT_AZ + 0.75;
   let current = opts.characterId || game.selection?.characterId || 'tilki';
@@ -138,6 +190,105 @@ function signatureDistance(track, gridDist) {
   return cands[0].d;
 }
 
+// Where the low pass can fly: stretches whose roadside pop-ups are densest just ahead, best first and
+// at least 120 m apart, so they unfold in front of the camera. Reads the scenery system's pop-up list
+// when it offers one (guarded: without it the chapter's signature moment is used).
+function clusterCandidates(game, track) {
+  const types = game.systems?.scenery?.popups?.types;
+  if (!Array.isArray(types) || !track.samples) return [];
+  const L = track.length, BIN = 10, N = Math.ceil(L / BIN);
+  const bins = new Float32Array(N);
+  const sides = new Float32Array(N); // + more to the right of travel
+  const s = track.samples, n = track.sampleCount, sp = track.spacing || L / n;
+  let total = 0;
+  for (const t of types) {
+    const items = t.items || [];
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (it.alwaysUp) continue;
+      const d = t.s ? t.s[i] : it.s;
+      if (!Number.isFinite(d)) continue;
+      const size = Math.min(6, it.size || 1);
+      if (size < 1) continue;
+      const dd = ((d % L) + L) % L;
+      const j = Math.min(n - 1, Math.floor(dd / sp));
+      const dx = it.x - s.px[j], dz = it.z - s.pz[j];
+      const lat = Math.hypot(dx, dz);
+      const w = size * (lat < 55 ? 1 : 0.25);
+      const b = Math.floor(dd / BIN) % N;
+      bins[b] += w;
+      sides[b] += w * Math.sign(dx * s.rx[j] + dz * s.rz[j]);
+      total += w;
+    }
+  }
+  if (total <= 0) return [];
+  // the low pass runs from c − 70 to c + 55; what it passes on the way is what it sees rise
+  const score = [];
+  for (let b = 0; b < N; b++) {
+    let sc = 0, sd = 0;
+    for (let k = -2; k <= 13; k++) { const i = ((b + k) % N + N) % N; sc += bins[i]; sd += sides[i]; }
+    score.push({ sc, c: b * BIN, side: Math.abs(sd) > 0.25 * sc ? Math.sign(sd) : 0 });
+  }
+  score.sort((a, b) => b.sc - a.sc);
+  const out = [];
+  const gap = (a, b) => { const d = Math.abs(a - b) % L; return Math.min(d, L - d); };
+  for (const e of score) {
+    if (out.every((o) => gap(o.c, e.c) >= 120)) out.push(e);
+    if (out.length >= 4) break;
+  }
+  return out;
+}
+
+// Tall fixed things a flyover could clip: the scenery's non-instanced meshes that rise well above the
+// page (cable-car pylons and cables, bridges, arches) and the start gantry.
+function tallObstacles(game, track) {
+  const out = [];
+  const pageY = track.pageY ?? 0;
+  const roots = [game.systems?.scenery?.group, track.objects?.startLine].filter(Boolean);
+  const box = new THREE.Box3();
+  for (const root of roots) {
+    root.updateMatrixWorld?.(true);
+    root.traverse?.((o) => {
+      if (!o.isMesh || o.isInstancedMesh || !o.geometry?.attributes?.position || !o.visible) return;
+      box.setFromObject(o);
+      if (box.max.y < pageY + 6) return;
+      out.push(o);
+    });
+  }
+  return out;
+}
+
+const ray = new THREE.Raycaster();
+const rayDir = new THREE.Vector3();
+
+// Rays along the path, the low part first (where gantries, bridges and cables are), then the descent
+// from high above; a ray costs 0.2–1.6 ms, so the check stops at the budget and counts as clear.
+function pathClear(path, t1, obstacles, budgetMs) {
+  if (!obstacles.length) return true;
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), look = new THREE.Vector3();
+  const start = performance.now();
+  const spans = [[1.4, t1, 0.1], [0, 1.4, 0.14]];
+  for (const [from, to, step] of spans) {
+    path.sample(from, a, look);
+    for (let t = from + step; t <= to + 1e-6; t += step) {
+      path.sample(t, b, look);
+      rayDir.subVectors(b, a);
+      const len = rayDir.length();
+      if (len > 1e-3) {
+        ray.set(a, rayDir.multiplyScalar(1 / len));
+        ray.far = len + 2.5;
+        if (ray.intersectObjects(obstacles, false).length) return false;
+      }
+      a.copy(b);
+      if (performance.now() - start > budgetMs) return true;
+    }
+  }
+  return true;
+}
+
+// Chosen low-pass stretch per track and grid spot: the rays run once per chapter, not every race.
+const passCache = new Map();
+
 export function introShot(ctx, opts) {
   const { game } = ctx;
   const track = opts.track || game.track;
@@ -148,7 +299,6 @@ export function introShot(ctx, opts) {
   const P = (player.visual?.object3d?.position || player.pos).clone();
   track.query(player.pos, -1, info);
   const gridD = info.dist ?? 0;
-  const sig = signatureDistance(track, gridD);
   const aspect = game.camera.aspect || 1.6;
   const cfg = game.config.camera;
   const s = {};
@@ -170,9 +320,59 @@ export function introShot(ctx, opts) {
   const rm = !!game.reducedMotion;
   const T = rm ? 6.6 : 6.0;
   let segments;
-  if (!rm) {
-    // The low pass runs beside the signature moment (a pop-up ramp) rather than over it, so it is
-    // seen unfolding in three-quarter view.
+  // A pass over the grid would show the karts twice: such stretches go last.
+  const overGrid = (c) => { const d = ((gridD - c) % L + L) % L; return d < 90 || d > L - 90; };
+  const cands = clusterCandidates(game, track).sort((a, b) => overGrid(a.c) - overGrid(b.c));
+  if (!rm && cands.length) {
+    // High over the page, down onto the road and low along it through the busiest stretch: the
+    // roadside pop-ups rise in front of the camera. Home along the road when the grid is close ahead,
+    // otherwise a cut to behind the grid and a push-in to the chase camera.
+    const TA = 3.7;
+    // side: the camera keeps a few metres toward the busier roadside and looks a little into it
+    const passKeys = ({ c, side }) => {
+      const k = side * 4;
+      return [
+        { time: 0, pos: at(c - 250, -40, 140), look: at(c - 20, 0, 0), fov: cine },
+        { time: 1.1, pos: at(c - 145, -16, 48), look: at(c - 10, 0, 1), fov: cine },
+        { time: 1.9, pos: at(c - 72, k * 0.5 - 4, 12), look: at(c + 5, k, 3), fov: cine },
+        { time: 2.5, pos: at(c - 32, k, 5.8), look: at(c + 30, k * 2.5, 2.5), fov: cine },
+        { time: 3.1, pos: at(c + 12, k, 5.6), look: at(c + 72, k * 2.5, 2.2), fov: cine },
+        { time: TA, pos: at(c + 55, k * 0.5, 6.2), look: at(c + 112, k, 2), fov: cine },
+      ];
+    };
+    const cacheKey = `${track.def?.id || ''}:${Math.round(gridD)}:${cands.map((e) => e.c).join(',')}`;
+    let pick = passCache.get(cacheKey);
+    if (!pick) {
+      const obstacles = tallObstacles(game, track);
+      pick = cands[0];
+      for (const cand of cands.slice(0, 3)) {
+        if (pathClear(createKeyPath(passKeys(cand)), TA, obstacles, 45)) { pick = cand; break; }
+      }
+      passCache.set(cacheKey, pick);
+    }
+    const c = pick.c;
+    const home = ((gridD - (c + 55)) % L + L) % L;
+    if (home > 40 && home < 260) {
+      const keys = [
+        ...passKeys(pick),
+        { time: (TA + 5.15) / 2, pos: at(c + 55 + home * 0.5, 0, 7.5), look: at(c + 55 + home * 0.5 + 45, 0, 2), fov: cine },
+        { time: 5.15, pos: behindPos, look: behindLook, fov: (cine + endV) / 2 },
+        { time: T, pos: endPos, look: endLook, fov: endV },
+      ];
+      segments = [{ t0: 0, t1: T, path: createKeyPath(keys) }];
+    } else {
+      segments = [
+        { t0: 0, t1: TA, path: createKeyPath(passKeys(pick)) },
+        { t0: TA, t1: T, path: createKeyPath([
+          { time: 0, pos: at(gridD - 70, 2, 13), look: at(gridD - 10, 0, 1.5), fov: cine },
+          { time: 1.45, pos: behindPos, look: behindLook, fov: (cine + endV) / 2 },
+          { time: T - TA, pos: endPos, look: endLook, fov: endV },
+        ]) },
+      ];
+    }
+  } else if (!rm) {
+    const sig = signatureDistance(track, gridD);
+    // Beside the signature moment (a pop-up ramp) rather than over it: seen unfolding in three-quarter view.
     const keys = [
       { time: 0, pos: at(sig - 260, -40, 150), look: at(sig - 30, 0, 0), fov: cine },
       { time: 1.1, pos: at(sig - 150, -22, 62), look: at(sig - 5, 0, 1), fov: cine },
@@ -199,6 +399,7 @@ export function introShot(ctx, opts) {
     keys.push({ time: T, pos: endPos, look: endLook, fov: endV });
     segments = [{ t0: 0, t1: T, path: createKeyPath(keys) }];
   } else {
+    const sig = cands.length ? cands[0].c + 30 : signatureDistance(track, gridD);
     // Reduced motion: three held set-ups joined by cuts, each moving only a few metres.
     const hold = (a, b, la, lb, fa, fb, dur) => createKeyPath([
       { time: 0, pos: a, look: la, fov: fa }, { time: dur, pos: b, look: lb, fov: fb },
@@ -324,6 +525,9 @@ export function podiumShot(ctx, opts) {
   const rm = !!game.reducedMotion;
   const top3 = (opts.top3 || []).filter((e) => e && e.characterId);
   stage.setMode('podium');
+  stage.setBook('open', { snap: true });
+  // the ceremony closes the cup: the book lies open at its last chapter
+  stage.showChapter(CUP[CUP.length - 1], { animate: false });
   stage.unfold({ from: 0, delay: 0.05, snap: rm });
   podium.reset(top3, { sadId: game.selection?.characterId || null, reducedMotion: rm });
   const center = new THREE.Vector3(0, 3.1, PODIUM.z);

@@ -156,6 +156,7 @@ export function createCinematics(game) {
       game,
       stage: ensureStage,
       podium: ensurePodium,
+      fromStage,
       complete() { if (!entry.done) { entry.done = true; entry.resolve(true); } },
       end() { if (active === entry) finishActive(true); else if (!entry.done) { entry.done = true; entry.resolve(true); } },
     };
@@ -221,5 +222,11 @@ export function createCinematics(game) {
     stage = null;
   }
 
-  return { update, play, stop, dispose, get shot() { return active ? active.name : null; } };
+  return {
+    update, play, stop, dispose,
+    get shot() { return active ? active.name : null; },
+    // read by the UI (the title waits for the cover) and by tests
+    get book() { return stage ? stage.book : null; },
+    get pageChapter() { return stage ? stage.chapter : null; },
+  };
 }

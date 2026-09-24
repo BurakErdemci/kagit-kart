@@ -138,14 +138,18 @@ export class PieceBuilder {
 
 // kind: 'hinge' (card rotating about its base line), 'box' (collapses backwards like a paper box),
 // 'static' (never moves). yaw turns local +z toward that heading (ARCHITECTURE §4 convention).
+// fdir: a hinge card folds away from its face (1) or face down toward the reader (-1).
+// post(P, N, offset, count): optional world-space transform applied after a piece is written (the
+// left page's pieces ride the turning cover); call dirtyAll() whenever it changes.
 export function createPopupBatch(name, material, { cast = true, receive = true } = {}) {
   const pieces = [];
   let geometry = null, mesh = null;
   let posAttr = null, nrmAttr = null;
+  let post = null;
 
-  function add(builder, { kind = 'hinge', x = 0, y = 0, z = 0, yaw = 0, open = 1, tag = null } = {}) {
+  function add(builder, { kind = 'hinge', x = 0, y = 0, z = 0, yaw = 0, open = 1, tag = null, fdir = 1 } = {}) {
     const piece = {
-      kind, tag, x, y, z, yaw, cy: Math.cos(yaw), sy: Math.sin(yaw),
+      kind, tag, x, y, z, yaw, fdir, cy: Math.cos(yaw), sy: Math.sin(yaw),
       local: new Float32Array(builder.pos), localN: new Float32Array(builder.nrm),
       col: builder.col, uv: builder.uv,
       start: 0, count: builder.pos.length / 3,
@@ -189,7 +193,7 @@ export function createPopupBatch(name, material, { cast = true, receive = true }
   function write(p) {
     const P = posAttr.array, N = nrmAttr.array, L = p.local, LN = p.localN;
     const o = p.start * 3;
-    const th = p.u * (Math.PI / 2);
+    const th = p.fdir < 0 ? Math.PI - p.u * (Math.PI / 2) : p.u * (Math.PI / 2);
     const s = Math.sin(th), c = Math.cos(th);
     const cy = p.cy, sy = p.sy;
     for (let i = 0; i < p.count * 3; i += 3) {
@@ -208,7 +212,17 @@ export function createPopupBatch(name, material, { cast = true, receive = true }
       N[o + i + 1] = my;
       N[o + i + 2] = -nx * sy + mz * cy;
     }
+    if (post) post(P, N, o, p.count);
     p.dirty = false;
+  }
+
+  function setPost(fn) {
+    post = fn;
+    dirtyAll();
+  }
+
+  function dirtyAll() {
+    for (const p of pieces) p.dirty = true;
   }
 
   // target 0 = folded flat, 1 = upright. delay in seconds; snap skips the spring.
@@ -261,5 +275,5 @@ export function createPopupBatch(name, material, { cast = true, receive = true }
     geometry?.dispose();
   }
 
-  return { pieces, add, build, set, update, dispose, get mesh() { return mesh; } };
+  return { pieces, add, build, set, update, dispose, setPost, dirtyAll, get mesh() { return mesh; } };
 }

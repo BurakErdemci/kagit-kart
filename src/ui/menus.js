@@ -8,14 +8,13 @@ import { createSettingsForm, createControlsForm } from './forms.js';
 const BACK_ARROW = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="#f3ead3" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const GEAR = '<svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="#2d2a32" stroke-width="2.2" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></g></svg>';
 const PAD = '<svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="#2d2a32" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"><path d="M6 8h12a4 4 0 0 1 4 4l-.6 4a2.5 2.5 0 0 1-4.4 1.2L15.5 15h-7L7 17.2a2.5 2.5 0 0 1-4.4-1.2L2 12a4 4 0 0 1 4-4z"/><path d="M7 10.5v3M5.5 12h3"/></g><circle cx="16" cy="11" r="1.1" fill="#2d2a32"/><circle cx="18" cy="13" r="1.1" fill="#2d2a32"/></svg>';
-const KART_EMBLEM = '<svg viewBox="0 0 180 100" aria-hidden="true"><g fill="none" stroke-linecap="round" stroke-linejoin="round"><g stroke="rgba(255,255,255,.14)" stroke-width="3.2" transform="translate(1 1.5)"><path d="M28 64h120l-8-20H96l-12-18H58l-8 18H36z"/><circle cx="52" cy="72" r="13"/><circle cx="126" cy="72" r="13"/><path d="M70 26q2-14 16-14"/><path d="M8 46h18M4 58h16M10 70h12"/></g><g stroke="rgba(14,30,35,.8)" stroke-width="3.2"><path d="M28 64h120l-8-20H96l-12-18H58l-8 18H36z"/><circle cx="52" cy="72" r="13"/><circle cx="126" cy="72" r="13"/><path d="M70 26q2-14 16-14"/><path d="M8 46h18M4 58h16M10 70h12"/></g></g></svg>';
 const RULE_INK = '<svg viewBox="0 0 280 18" aria-hidden="true"><g stroke="#2d2a32" stroke-width="2" fill="none" opacity=".55"><path d="M0 9h118M162 9h118"/><path d="M140 2l7 7-7 7-7-7z" fill="#d9483b" stroke="none"/></g></svg>';
-const RULE = '<svg viewBox="0 0 280 18" aria-hidden="true"><g stroke="#d8ad4c" stroke-width="2" fill="none" opacity=".75"><path d="M0 9h118M162 9h118"/><path d="M140 1l8 8-8 8-8-8z" fill="#d8ad4c"/><circle cx="124" cy="9" r="2" fill="#d8ad4c"/><circle cx="156" cy="9" r="2" fill="#d8ad4c"/></g></svg>';
 
 export const STAT_LABELS = [['speed', 'Hız'], ['accel', 'İvme'], ['handling', 'Yol tutuş'], ['weight', 'Ağırlık'], ['offroad', 'Arazi']];
 
 const MODES = [
-  { id: 'gp', title: 'Grand Prix', text: 'Dört bölümlük kupa. Her yarış puan getirir.', tags: ['4 bölüm', 'puanlı'], plate: '#f2c14e' },
+  // 'Prix' is French: written in capitals so the Turkish upper-casing leaves its I undotted
+  { id: 'gp', title: 'GRAND PRIX', text: 'Dört bölümlük kupa. Her yarış puan getirir.', tags: ['4 bölüm', 'puanlı'], plate: '#f2c14e' },
   { id: 'single', title: 'Tek Yarış', text: 'Bir bölüm seç, yedi rakibe karşı yarış.', tags: ['1 bölüm', '8 sürücü'], plate: '#d9483b' },
   { id: 'tt', title: 'Zamana Karşı', text: 'Tek başına, en iyi turunun hayaletine karşı.', tags: ['hayalet', 'rekor'], plate: '#5f7fa3' },
 ];
@@ -40,23 +39,15 @@ export function createMenus(ctx) {
   let screen = null;
   let current = null;
 
-  // ------------------------------------------------------------- cover
-  const coverWrap = h('div', { class: 'kk-coverwrap kk-hit' });
-  const cover = h('div', { class: 'kk-cover' });
+  // ------------------------------------------------------------- title
+  // The book on the desk is the cover now (cinematics' title shot draws it, title lettering included);
+  // the DOM only adds a pinned paper tag and takes the click or tap anywhere on the screen.
+  const coverWrap = h('div', { class: 'kk-coverwrap kk-hit', role: 'button', 'aria-label': 'Kâğıt Kart: başlamak için dokun' });
   const ctaGlyph = h('span', { 'data-glyph': 'confirm' });
-  cover.append(
-    h('div', { class: 'kk-hinge' }),
-    h('div', { class: 'kk-frame' }),
-    h('div', { class: 'kk-cover-inner' },
-      h('div', { class: 'kk-cover-kicker' }, up('Açılır kitap yarışı')),
-      h('div', { class: 'kk-cover-title' }, lt('Kâğıt Kart', 'head', { seed: 7, halftone: true,
-        colors: { fill: ['var(--mustard)', 'var(--red)', '#8fb3d9', 'var(--rose)', 'var(--paper-hi)', '#9cc56b', 'var(--mustard)', 'var(--red)', '#8fb3d9'], shadow: '#10232a', plate: null } })),
-      svg(RULE, 'kk-cover-rule'),
-      svg(KART_EMBLEM, 'kk-cover-emblem'),
-      h('div', { class: 'kk-cover-cta' }, sheet([h('span', null, 'Başlamak için dokun'), ctaGlyph], { dk: 1 }))),
-    h('div', { class: 'kk-bookmark' }, h('i')),
-    h('div', { class: 'kk-cover-shade' }));
-  coverWrap.appendChild(cover);
+  const cta = h('div', { class: 'kk-cover-cta' },
+    h('i', { class: 'kk-tape' }),
+    sheet([h('span', null, 'Başlamak için dokun'), ctaGlyph], { dk: 1 }));
+  coverWrap.append(h('h1', { class: 'kk-sr' }, 'Kâğıt Kart'), cta);
   let coverState = 'closed';
 
   coverWrap.addEventListener('click', () => { if (coverState === 'closed') startGame(); });
@@ -68,30 +59,30 @@ export function createMenus(ctx) {
     ctx.api('setMenuScreen', 'mode');
   }
 
+  // The tag folds down as the cover opens and stands up again once the book has shut.
   function openCover() {
-    if (coverState === 'open' || coverState === 'opening') return;
-    coverState = 'opening';
-    cover.classList.remove('is-closing');
-    if (ctx.reduced()) { coverWrap.classList.add('is-open'); coverState = 'open'; return; }
-    cover.classList.add('is-opening');
-    coverWrap.classList.add('is-open');
-    later(() => { if (coverState === 'opening') coverState = 'open'; }, 950);
+    if (coverState === 'open') return;
+    coverState = 'open';
+    cta.classList.remove('is-back');
+    if (ctx.reduced()) { coverWrap.hidden = true; return; }
+    cta.classList.add('is-away');
+    later(() => { if (coverState === 'open') coverWrap.hidden = true; }, 260);
   }
 
   function closeCover() {
     if (coverState === 'closed') return;
     coverState = 'closed';
-    cover.classList.remove('is-opening');
-    coverWrap.classList.remove('is-open');
+    coverWrap.hidden = false;
+    cta.classList.remove('is-away');
     if (!ctx.reduced()) {
-      cover.classList.add('is-closing');
-      later(() => cover.classList.remove('is-closing'), 720);
+      cta.classList.remove('is-back');
+      void cta.offsetWidth;
+      cta.classList.add('is-back');
     }
   }
 
   function setCoverInstant(open) {
-    cover.classList.remove('is-opening', 'is-closing');
-    coverWrap.classList.toggle('is-open', open);
+    cta.classList.remove('is-away', 'is-back');
     coverWrap.hidden = open;
     coverState = open ? 'open' : 'closed';
   }
@@ -128,7 +119,7 @@ export function createMenus(ctx) {
     el.appendChild(prompts);
   }
 
-  function popDelay(el, i) { el.style.animationDelay = `${60 + i * 70}ms`; return el; }
+  function popDelay(el, i) { el.style.setProperty('--d', `${60 + i * 70}ms`); return el; }
 
   // ------------------------------------------------------------- mode
   function buildMode() {
@@ -307,7 +298,8 @@ export function createMenus(ctx) {
   const BUILDERS = { mode: buildMode, class: buildClass, character: buildCharacter, track: buildTrack,
     settings: () => buildForm('settings'), controls: () => buildForm('controls') };
 
-  function show(name) {
+  // late: the first screen after the title waits for the book's cover to land before its cards rise.
+  function show(name, { late = false } = {}) {
     if (name === screen) return;
     const prev = current;
     if (prev) {
@@ -325,6 +317,7 @@ export function createMenus(ctx) {
     const build = BUILDERS[name];
     if (!build) return;
     current = build();
+    if (late && !ctx.reduced()) current.el.classList.add('kk-late');
     layer.appendChild(current.el);
     if (current.items) current.focus.set(current.items, current.index || 0);
     ctx.glyphs(current.el);

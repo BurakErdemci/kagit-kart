@@ -144,6 +144,7 @@ export function createUI(game) {
   let pauseOpen = false;
   let lastDevice = '';
   let lastReduced = null;
+  let lastMinQ = null;
   let lastTouchRace = null;
 
   function desiredView() {
@@ -208,6 +209,8 @@ export function createUI(game) {
     }
     const rm = !!game.reducedMotion;
     if (rm !== lastReduced) { lastReduced = rm; root.classList.toggle('kk-rm', rm); }
+    const minQ = game.quality === 'minimal';
+    if (minQ !== lastMinQ) { lastMinQ = minQ; root.classList.toggle('kk-q-min', minQ); }
 
     const paused = !!game.paused && (view === 'race' || view === 'results' || view === 'intro');
     if (paused !== pauseOpen) {

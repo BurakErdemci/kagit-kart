@@ -280,6 +280,8 @@ ${dkFine}
 .kk-map{position:relative; width:12.5em; height:12.5em; transform:rotate(1.5deg); filter:drop-shadow(.14em .18em 0 rgba(45,42,50,.78))}
 .kk-map .kk-paper{position:absolute; inset:0}
 .kk-map svg{position:absolute; inset:.6em; width:calc(100% - 1.2em); height:calc(100% - 1.2em); overflow:visible}
+/* lowest quality: the svg gets its own layer, so moving dots repaint it alone, not the rotated, filtered sheet */
+.kk-q-min .kk-map svg{will-change:transform}
 
 .kk-center{position:absolute; left:50%; top:22%; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; gap:.8em}
 .kk-banner{position:relative; padding:.3em 1.9em .38em; font-size:3.4em; white-space:nowrap;

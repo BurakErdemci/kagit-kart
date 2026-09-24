@@ -172,21 +172,28 @@ export function createHUD(ctx) {
     mapT = { minX, minZ, sc, ox, oz, dots };
   }
 
-  function updateMap() {
+  // Every dot move repaints the map. On a software rasteriser that costs ~20 ms at 1366x768 (lowend.mjs),
+  // so the lowest quality level moves the dots ten times a second.
+  let mapWait = 0;
+  function updateMap(dt) {
     if (!mapT) return;
+    if (game.quality === 'minimal') {
+      mapWait -= dt;
+      if (mapWait > 0) return;
+      mapWait = 0.1;
+    }
     const { minX, minZ, sc, ox, oz, dots } = mapT;
     for (const d of dots) {
       const k = d.kart;
       const p = k.pos;
       if (!p) continue;
       const x = ((p.x - minX) * sc + ox).toFixed(2), y = ((p.z - minZ) * sc + oz).toFixed(2);
+      let tf = `translate(${x} ${y})`;
       if (k.isPlayer) {
         const hh = k.heading || 0;
-        const deg = (Math.atan2(Math.cos(hh), Math.sin(hh)) * 180 / Math.PI).toFixed(1);
-        d.g.setAttribute('transform', `translate(${x} ${y}) rotate(${deg})`);
-      } else {
-        d.g.setAttribute('transform', `translate(${x} ${y})`);
+        tf += ` rotate(${(Math.atan2(Math.cos(hh), Math.sin(hh)) * 180 / Math.PI).toFixed(1)})`;
       }
+      if (tf !== d.tf) { d.tf = tf; d.g.setAttribute('transform', tf); }
     }
   }
 
@@ -471,7 +478,7 @@ export function createHUD(ctx) {
       const total = game.karts?.length || 8;
       if (p.place && (p.place !== shownPlace || total !== shownTotal)) setPlace(p.place, total, false);
       updateSlot(p, dt);
-      updateMap();
+      updateMap(dt);
       updateThreat(dt);
       updateInk(dt);
       if (splitTimer > 0) { splitTimer -= dt; if (splitTimer <= 0) split.classList.remove('is-on'); }

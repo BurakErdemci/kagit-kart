@@ -83,11 +83,15 @@ export const config = {
     driftSteerDeadzone: 0.2,
 
     boostTopGain: 0.35,
+    // The player's boosts reach higher: at 0.35 and the old lengths the owner could not pass the pack
+    // (24 Sep). A shared gain of 0.5 sent CPUs off void edges (respawns 0.08 -> 2.5 a race), so only
+    // the player gets it; the lengths below apply to everyone (sim: respawns unchanged, spread 7 s).
+    playerBoostTopGain: 0.45,
     boostRampTime: 0.3,
     boosts: {
-      tier1: [0.6, 1], tier2: [1.1, 1], tier3: [1.6, 1],
-      start: [1.0, 1], weakStart: [0.4, 1], trick: [0.8, 1], pad: [1.0, 1],
-      rocket: [1.3, 1.15], draft: [0.9, 0.6], respawn: [0.5, 1],
+      tier1: [0.8, 1], tier2: [1.4, 1], tier3: [2.0, 1],
+      start: [1.3, 1], weakStart: [0.4, 1], trick: [1.0, 1], pad: [1.3, 1],
+      rocket: [1.7, 1.15], draft: [0.9, 0.6], respawn: [0.5, 1],
     },
 
     draftRange: 14,

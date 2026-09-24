@@ -301,7 +301,8 @@ export class Kart {
     this.topSpeed = this.baseTop * this.rubberBand * (this.invincibleTime > 0 ? 1 + K.invincibleTopGain : 1);
     let cap = this.topSpeed;
     const surf = this.surface;
-    if (boosting) cap = this.topSpeed * (1 + K.boostTopGain * this.boostStrength);
+    const boostGain = this.isPlayer ? K.playerBoostTopGain : K.boostTopGain;
+    if (boosting) cap = this.topSpeed * (1 + boostGain * this.boostStrength);
     else if (surf === 'offroad') cap *= K.offroadCap + K.statOffroad * (this.stats.offroad - 3);
     else if (surf === 'out') cap *= K.outCap;
     else if (surf === 'sand') cap *= K.sandCap;
@@ -319,7 +320,7 @@ export class Kart {
       const accelTime = K.accelTime * (1 - K.statAccel * (this.stats.accel - 3));
       const kAcc = Math.log(5) / accelTime;
       if (boosting) {
-        const boostAccel = (this.topSpeed * K.boostTopGain) / K.boostRampTime;
+        const boostAccel = (this.topSpeed * boostGain) / K.boostRampTime;
         const expAcc = (cap - f) * kAcc;
         f = approach(f, cap, Math.max(boostAccel, expAcc, 0) * dt);
       } else if (brake > 0.1 && f > 0.5) {

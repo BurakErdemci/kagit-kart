@@ -814,3 +814,10 @@ answers to it:
 - `track.waterSurface(edgeY)` honours `def.waterLevel`; the builder draws water at that height. `killY = deskY + 0.3`; `config.track.killDepth` is dead. While the camera target is below the page, the rig holds at `pageY + 1` and looks down.
 - `finish { kart, place, time, estimated }` fires for every kart; `estimated: true` for those classified by `finishNow()`/`conclude()`, emitted after `updatePlaces()`.
 - `query()` with a hint: when the hinted result lies beyond the offroad band, the grid lookup also runs and wins if nearer (shortcut crossings hand over to the far section).
+
+### 19.4 Tracks + first-impression passes (24 Sep; binding over §10.4 / §10.5 / §10.8 where they differ)
+- Title: no DOM cover. The first frame is a closed cloth-bound 3D book on the desk (cover printed in code, lettering per §13) with the player's kart parked beside it; a key/tap opens it and the menus run on the open pop-up book. DOM keeps only a taped "Başlamak için dokun" slip. Cinematics exposes read-only `book` ('open' | 'closing' | 'closed' | 'opening') and `pageChapter`.
+- Track select turns a real page per chapter (queued on fast input; page always matches the selection). The 3D pop-up set on the pages is shared across chapters.
+- Intro flyovers pick a low path over the densest scenery stretch, ray-tested against overhead structures, cached per track. They read scenery's runtime `popups.types`/`group` and `track.objects.startLine` (guarded; fallback is the old ramp route).
+- Default mode is Grand Prix: `startRace({})` without a mode starts GP. Tests pass the mode explicitly.
+- Scenery: `standingOK` rejects the void strip; fences use `theme.fence` (not `theme.wall`); `Parts.strip` places each strip at its own position.

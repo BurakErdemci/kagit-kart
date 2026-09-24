@@ -349,18 +349,30 @@ export function penGeometry() {
   return g;
 }
 
-// Ink bottle, centred on its middle so it tumbles about it.
+// Ink bottle, centred on its middle so it tumbles about it: a squat faceted glass inkwell, uncapped,
+// dark ink up to the shoulder with pale empty glass above it, a glint down one facet, a cream label
+// printed with a nib, and the ink showing in the open mouth. (A navy body with a cream band read as a
+// blue pebble in flight.)
 export function bottleGeometry() {
-  const glass = '#26345c', label = '#efe4c8', cap = '#1d1b22', inkBlue = '#2f58a8';
+  const ink = '#141c36', inkLip = '#27407e', glass = '#aac2de', glassEdge = '#d8e6f4', glint = '#f4f8fc';
+  const label = '#f3ead3', nib = '#2d2a32', gold = '#d8ad4c', rim = '#7e97bb';
+  const oct = (rTop, rBot, h, y) => new THREE.CylinderGeometry(rTop, rBot, h, 8).rotateY(Math.PI / 8).translate(0, y + h / 2, 0);
   const parts = [
-    paint(new THREE.CylinderGeometry(0.33, 0.37, 0.52, 8).translate(0, 0.26, 0), glass),
-    paint(new THREE.CylinderGeometry(0.372, 0.378, 0.24, 8).translate(0, 0.27, 0), label),
-    paint(new THREE.CylinderGeometry(0.12, 0.12, 0.02, 6).rotateX(Math.PI / 2).translate(0, 0.28, 0.375), inkBlue),
-    paint(new THREE.CylinderGeometry(0.16, 0.33, 0.14, 8).translate(0, 0.59, 0), glass),
-    paint(new THREE.CylinderGeometry(0.13, 0.13, 0.1, 8).translate(0, 0.71, 0), glass),
-    paint(new THREE.CylinderGeometry(0.17, 0.17, 0.16, 8).translate(0, 0.84, 0), cap),
+    paint(oct(0.46, 0.47, 0.34, 0), ink),                       // body full of ink
+    paint(oct(0.462, 0.462, 0.12, 0.34), glass),                // empty glass above the ink line
+    paint(oct(0.466, 0.466, 0.2, 0.08), label),                 // label band
+    paint(oct(0.24, 0.462, 0.1, 0.46), glassEdge),              // shoulder
+    paint(oct(0.2, 0.2, 0.1, 0.56), glass),                     // neck
+    paint(oct(0.235, 0.235, 0.05, 0.66), rim),                  // lip
+    paint(new THREE.CylinderGeometry(0.18, 0.18, 0.012, 12).translate(0, 0.707, 0), inkLip), // ink in the mouth
+    // (the octagon's front facet lies 0.43 out; the glint sits on the front-left facet)
+    paint(new THREE.BoxGeometry(0.06, 0.4, 0.01).translate(0, 0.23, 0).rotateY(-Math.PI / 4).translate(-0.314, 0, 0.314), glint),
+    // the printed nib on the label, and a gold rule over and under it
+    paint(new THREE.ConeGeometry(0.075, 0.17, 4).rotateY(Math.PI / 4).scale(1, 1, 0.25).translate(0, 0.17, 0.452), nib),
+    paint(new THREE.BoxGeometry(0.34, 0.018, 0.01).translate(0, 0.265, 0.437), gold),
+    paint(new THREE.BoxGeometry(0.34, 0.018, 0.01).translate(0, 0.095, 0.437), gold),
   ];
-  const g = merge(parts).translate(0, -0.42, 0).scale(2, 2, 2);
+  const g = merge(parts).translate(0, -0.36, 0).scale(2, 2, 2);
   g.computeVertexNormals();
   return g;
 }

@@ -4,8 +4,8 @@
 import * as THREE from 'three';
 import { clamp, lerpAngle, smoothstep } from '../core/math.js';
 import {
-  blobGeometry, bottleGeometry, boxAtlas, boxGeometry, discGeometry, flyerGeometry, foilShellGeometry,
-  gumGeometry, gumSeeds, penGeometry, scissorsHalfGeometry,
+  bottleGeometry, boxAtlas, boxGeometry, discGeometry, dropGeometry, flyerGeometry, foilShellGeometry,
+  gumGeometry, gumSeeds, penGeometry, scissorsHalfGeometry, splatGeometry,
 } from './shapes.js';
 
 const CAP = { gum: 72, flyer: 16, pen: 40, bottle: 4, drop: 72, scissors: 4, decal: 72 };
@@ -17,7 +17,6 @@ const TRAIL_LIFE = 0.5;
 // Planes fly visually a little higher than they hit (sim hover 0.75 m), so they clear the kart's own
 // silhouette in the chase view almost at once; the hit test still uses the simulated height.
 const FLYER_LIFT = 0.5;
-const INK_BLUE = '#2a4a9c';
 // The boxes' own paper, the same on every chapter: they must read at a glance by day and by night,
 // and a theme's accents can be two near-identical yellows and a cream (Boğaz Gecesi).
 // Cells: 0 = front/back faces, 1 = top/bottom, 2 = left/right.
@@ -261,8 +260,9 @@ export function createItemVisuals(game, sim) {
         .replace('#include <opaque_fragment>', GUM_GLOSS_GLSL + '\n#include <opaque_fragment>');
   });
   const gumMesh = inst(gumGeo, gumMat, CAP.gum, 'gum', true);
-  const blob = geo(blobGeometry('#f06fa8', '#ffe1ee', '#c94f8a'));
-  const dropMesh = inst(blob, mats.paper(INK_BLUE), CAP.drop, 'ink-drops');
+  // Ink: glossy teardrops in the air, flat lobed splats where they land or burst.
+  const dropMesh = inst(geo(dropGeometry()), vertexColored, CAP.drop, 'ink-drops');
+  const splatMesh = inst(geo(splatGeometry()), vertexColored, CAP.drop, 'ink-splats');
 
   // --- flyers: plane + homing share one mesh ----------------------------------------------------
   const flyerGeo = geo(flyerGeometry());
@@ -320,7 +320,9 @@ export function createItemVisuals(game, sim) {
   const tumbles = [];
   for (let i = 0; i < TUMBLES; i++) tumbles.push({ on: false, pos: new THREE.Vector3(), quat: new THREE.Quaternion(), vel: new THREE.Vector3(), axis: new THREE.Vector3(1, 0, 0), t: 0 });
   const drops = [];
-  for (let i = 0; i < CAP.drop; i++) drops.push({ on: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), floor: 0, t: 0, size: 0.3, splat: -1, big: false });
+  for (let i = 0; i < CAP.drop; i++) drops.push({ on: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), floor: 0, t: 0, size: 0.3, splat: -1, big: false, rot: i * 2.39996 });
+  // per flying bottle (projectile id): the last trail slot it dripped in, and when it was last seen
+  const inkTrail = new Map();
   const bits = [];
   for (let i = 0; i < 24; i++) bits.push({ on: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), floor: 0, t: 0 });
   const snips = [];
@@ -352,9 +354,9 @@ export function createItemVisuals(game, sim) {
       d.splat = -1;
       d.pos.copy(pos);
       d.floor = floor;
-      if (n < 5) { // the bottle's body bursting
+      if (n < 5) { // the bottle bursting: splashes that face the camera
         d.big = true;
-        d.size = 1.5 + (n % 2) * 0.6;
+        d.size = 1.3 + (n % 2) * 0.55;
         d.pos.x += Math.cos(n * 2.4) * 0.9;
         d.pos.y += Math.sin(n * 1.7) * 0.5;
         d.pos.z += Math.sin(n * 2.4) * 0.9;
@@ -723,12 +725,14 @@ export function createItemVisuals(game, sim) {
         _p2.set(0, 0, -1.2 * sc).applyQuaternion(_q).add(_p);
         trailSample(p, _p2);
       } else if (p.kind === 'ink' && nb < CAP.bottle) {
+        // a slow tumble so the bottle's shape reads, spilling from its open mouth as it goes
         _p2.set(Math.cos(heading), 0, -Math.sin(heading));
-        _q.setFromAxisAngle(_p2, p.age * 11);
+        _q.setFromAxisAngle(_p2, 0.6 + p.age * 5.5);
         _q2.setFromAxisAngle(Y, heading);
         _q.multiply(_q2);
         setAt(bottleMesh, nb++, _p, _q, 1, 1, 1);
-        decal(_p.x, p.to.y, _p.z, Y, _p.y - p.to.y, 0.55, 0.55, 0);
+        decal(_p.x, p.to.y, _p.z, Y, _p.y - p.to.y, 0.6, 0.6, 0);
+        dripInk(p, _p, _q);
       } else if (p.kind === 'scissors' && ns + 2 <= CAP.scissors) {
         let open, pitch = 0, scale = 1;
         if (p.phase < 2) {
@@ -761,35 +765,63 @@ export function createItemVisuals(game, sim) {
     finish(scissorsMesh, ns);
   }
 
+  // One drop from the bottle's mouth every 50 ms of its flight: a trail of ink falling onto the road.
+  function dripInk(p, pos, quat) {
+    const slot = Math.floor(p.age / 0.05);
+    const e = inkTrail.get(p.id);
+    if (e) e.seen = vt;
+    if (e && slot <= e.slot) return;
+    inkTrail.set(p.id, { slot, seen: vt });
+    const d = drops.find((x) => !x.on);
+    if (!d) return;
+    _p2.set(0, 1, 0).applyQuaternion(quat);
+    d.on = true;
+    d.big = false;
+    d.t = 0;
+    d.splat = -1;
+    d.pos.copy(pos).addScaledVector(_p2, 0.75);
+    d.vel.copy(_p2).multiplyScalar(2.2);
+    d.floor = p.to.y;
+    d.size = 0.32 + (slot % 3) * 0.08;
+  }
+
   function updateDrops(frameDt) {
-    let n = 0;
+    let nd = 0, ns = 0;
     for (let i = 0; i < drops.length; i++) {
       const d = drops[i];
       if (!d.on) continue;
       d.t += frameDt;
-      let sx, sy, sz;
       if (d.big) {
-        if (d.t > 0.4) { d.on = false; continue; }
-        const s = d.size * (d.t < 0.08 ? d.t / 0.08 : 1 - smoothstep(0.08, 0.4, d.t));
-        sx = sy = sz = s;
+        // a splash printed in the air, turned to the camera
+        if (d.t > 0.45) { d.on = false; continue; }
+        const s = d.size * (d.t < 0.07 ? d.t / 0.07 : 1 - smoothstep(0.14, 0.45, d.t));
+        _p.subVectors(camPos, d.pos).normalize();
+        _q.setFromUnitVectors(Y, _p);
+        _q2.setFromAxisAngle(Y, d.rot);
+        _q.multiply(_q2);
+        setAt(splatMesh, ns++, d.pos, _q, s, s, s);
       } else if (d.splat < 0) {
+        // a falling teardrop, its tip trailing and stretched by speed
         d.vel.y -= 16 * frameDt;
         d.pos.addScaledVector(d.vel, frameDt);
-        if (d.pos.y <= d.floor + 0.05) { d.pos.y = d.floor + 0.04; d.splat = d.t; }
+        if (d.pos.y <= d.floor + 0.05) { d.pos.y = d.floor + 0.03; d.splat = d.t; }
         if (d.t > 2) { d.on = false; continue; }
-        sx = sz = d.size;
-        sy = d.size * 1.3;
+        const sp = d.vel.length();
+        if (sp > 1e-3) _q.setFromUnitVectors(Y, _p.copy(d.vel).multiplyScalar(-1 / sp));
+        else _q.identity();
+        setAt(dropMesh, nd++, d.pos, _q, d.size, d.size * (1 + Math.min(0.9, sp * 0.06)), d.size);
       } else {
+        // landed: a flat splat that spreads, then shrinks away
         const s = d.t - d.splat;
-        if (s > 0.8) { d.on = false; continue; }
-        const k = 1 - smoothstep(0.35, 0.8, s);
-        sx = sz = d.size * 2.2 * k;
-        sy = 0.05 * k;
+        if (s > 1.2) { d.on = false; continue; }
+        const k = (s < 0.06 ? 0.55 + (s / 0.06) * 0.45 : 1) * (1 - smoothstep(0.65, 1.2, s));
+        _q.setFromAxisAngle(Y, d.rot);
+        setAt(splatMesh, ns++, d.pos, _q, d.size * 1.9 * k, d.size * 1.9, d.size * 1.9 * k);
       }
-      _q.identity();
-      setAt(dropMesh, n++, d.pos, _q, sx, sy, sz);
     }
-    finish(dropMesh, n);
+    finish(dropMesh, nd);
+    finish(splatMesh, ns);
+    if (inkTrail.size) for (const [id, e] of inkTrail) if (e.seen !== vt) inkTrail.delete(id);
   }
 
   function updateSnips(frameDt) {

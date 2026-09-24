@@ -528,6 +528,8 @@ function quitToTitle() {
 function setPaused(on) {
   on = !!on;
   if (on && !PAUSE_PHASES.has(game.phase)) return;
+  // A resume means the player is back: a latched setup pause (intro loss, blur) must not fire again.
+  if (!on) awayDuringSetup = lostDuringSetup = false;
   if (game.paused === on) return;
   game.paused = on;
   events.emit('pause', { paused: on });

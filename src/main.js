@@ -28,17 +28,39 @@ import { installTestApi } from './test/testApi.js';
 
 document.documentElement.lang = 'tr';
 
+// 'setup' (startRace until intro) neither steps nor pauses, and every race entry ignores calls in it.
 const STEP_PHASES = new Set(['countdown', 'race', 'finishing', 'results']);
 const PAUSE_PHASES = new Set(['intro', 'countdown', 'race', 'finishing', 'results']);
 const QUALITY_LEVELS = ['high', 'medium', 'low'];
+const SETTING_CHOICES = {
+  quality: ['auto', ...QUALITY_LEVELS],
+  reducedMotion: ['auto', 'on', 'off'],
+  touchControls: ['auto', 'on', 'off'],
+};
 
 const events = createEvents();
 const storage = createStorage();
 
+// Stored settings may be old or foreign (the origin is shared): a field is kept only when it has the
+// default's type and lies in its domain, unknown keys are dropped.
+function readSettings() {
+  const defaults = config.settingsDefaults;
+  const out = { ...defaults };
+  const stored = storage.get('settings', null);
+  if (!stored || typeof stored !== 'object') return out;
+  for (const key of Object.keys(defaults)) {
+    const v = stored[key];
+    if (SETTING_CHOICES[key]) { if (SETTING_CHOICES[key].includes(v)) out[key] = v; }
+    else if (typeof defaults[key] === 'number') { if (Number.isFinite(v)) out[key] = Math.min(1, Math.max(0, v)); }
+    else if (typeof v === typeof defaults[key]) out[key] = v;
+  }
+  return out;
+}
+
 const game = {
   THREE, config, rng: createRng(), events, storage,
   renderer: null, scene: null, camera: null, cameraRig: null, materials: null, post: null,
-  settings: { ...config.settingsDefaults, ...(storage.get('settings', {}) || {}) },
+  settings: readSettings(),
   reducedMotion: false, touch: false, quality: null, fontsReady: Promise.resolve(true),
   input: null,
   phase: 'boot',
@@ -55,6 +77,7 @@ const game = {
   // core extras
   loop: null,
   autoPause: true,
+  contextLost: false,
   debug: { leaks: [], lastLeakCheck: null },
 };
 window.__kkGame = game;
@@ -148,6 +171,9 @@ let skipResolve = null;
 let ghostRecorder = null;
 let collisions = null;
 let qualityChangedDuringRace = false;
+// A lost context resets three's GPU counters on restore, so this race's GPU counts are not comparable.
+let contextLostDuringRace = false;
+let pendingSetup = null;
 
 function sceneObjectCount() {
   let n = 0;
@@ -214,7 +240,7 @@ function checkLeaks() {
   if (post.objects !== preSetup.objects) problems.push(`scene objects ${preSetup.objects} → ${post.objects}`);
   // GPU memory returns exactly to the pre-setup values (§7.5). Core's shared textures are uploaded at
   // boot (materials.warm), so a module-level cache filled during a race shows up here too.
-  if (!qualityChangedDuringRace) {
+  if (!qualityChangedDuringRace && !contextLostDuringRace) {
     if (post.geometries !== preSetup.geometries) problems.push(`geometries ${preSetup.geometries} → ${post.geometries}`);
     if (post.textures !== preSetup.textures) problems.push(`textures ${preSetup.textures} → ${post.textures}`);
   }
@@ -257,14 +283,30 @@ function gridOrder(o, player, rng) {
   return [...cpus, player];
 }
 
-async function startRace(opts = {}) {
+// The phase turns 'setup' synchronously, before the first await: a second activation in the same
+// click burst (double-click, key repeat) finds it and gets the setup already running.
+function startRace(opts = {}) {
+  if (game.phase === 'setup') return pendingSetup;
   const o = normalizeOpts(opts);
   const token = ++raceToken;
+  setPhase('setup');
+  pendingSetup = setupRace(o, token).catch((e) => {
+    // A failed setup must not leave every race entry ignored behind 'setup'.
+    if (token === raceToken) {
+      try { quitToTitle(); } catch (err) { console.error('[setup] return to title failed', err); }
+    }
+    throw e;
+  });
+  return pendingSetup;
+}
+
+async function setupRace(o, token) {
   stopShot();
   teardownRace();
   preSetup = settledSnapshot();
   raceCount++;
   qualityChangedDuringRace = false;
+  contextLostDuringRace = game.contextLost;
   lastRaceOpts = o;
   if (o.mode !== 'gp') game.gp.active = false;
   if (o.mode === 'gp') gpSnapshot = JSON.parse(JSON.stringify({ standings: game.gp.standings, lastPlaces: game.gp.lastPlaces, totalTimes: game.gp.totalTimes }));
@@ -309,8 +351,8 @@ async function startRace(opts = {}) {
   // time-trial ghost
   let ghostPlayer = null;
   if (o.mode === 'tt') {
-    const best = storage.get(ttKey(o), null);
-    if (best && best.ghost && best.ghost.frames?.length) {
+    const best = readTTRecord(ttKey(o));
+    if (best?.ghost) {
       const visual = createKartVisual(game, playerChar, null, { ghost: true });
       game.scene.add(visual.object3d);
       ghostPlayer = createGhostPlayer(game, best.ghost, visual);
@@ -375,12 +417,34 @@ function ttKey(o) {
   return `tt:${o.track}:${o.cls}:${o.character}`;
 }
 
+const isNumberArray = (a) => Array.isArray(a) && a.every(Number.isFinite);
+
+// The one reader of stored time-trial records. Times count only when finite and positive; a ghost is
+// kept only in the shape createGhostPlayer and splitAt index into, otherwise it is dropped and the
+// valid times stay.
+function readTTRecord(key) {
+  const v = storage.get(key, null);
+  if (!v || typeof v !== 'object') return null;
+  const rec = {};
+  if (Number.isFinite(v.bestLap) && v.bestLap > 0) rec.bestLap = v.bestLap;
+  if (Number.isFinite(v.bestRace) && v.bestRace > 0) rec.bestRace = v.bestRace;
+  const g = v.ghost;
+  if (g && Number.isFinite(g.hz) && g.hz > 0 && isNumberArray(g.frames) && g.frames.length > 0
+    && g.frames.length % 4 === 0 && isNumberArray(g.checkpoints)) rec.ghost = g;
+  return rec;
+}
+
+function getBest({ track, cls, character } = {}) {
+  const b = readTTRecord(ttKey({ track, cls: String(cls), character }));
+  return b && (b.bestLap || b.bestRace) ? { lap: b.bestLap ?? null, race: b.bestRace ?? null } : null;
+}
+
 function onRaceEnd() {
   const o = lastRaceOpts;
   if (!o || o.mode !== 'tt' || !ghostRecorder) return;
   const p = game.player;
   if (!p || p.estimated) return;
-  const best = storage.get(ttKey(o), null) || {};
+  const best = readTTRecord(ttKey(o)) || {};
   const total = p.finishTime;
   const next = { ...best };
   if (p.bestLap != null && (best.bestLap == null || p.bestLap < best.bestLap)) next.bestLap = p.bestLap;
@@ -392,6 +456,7 @@ function onRaceEnd() {
 }
 
 function startGP({ cls, character, seed, index = 0, standings = null } = {}) {
+  if (game.phase === 'setup') return pendingSetup;
   const cup = CUP.slice();
   game.gp = { active: true, cup, index: Math.max(0, Math.min(cup.length - 1, index)), standings: {}, lastPlaces: {}, totalTimes: {} };
   if (standings) game.gp.standings = { ...standings };
@@ -399,6 +464,7 @@ function startGP({ cls, character, seed, index = 0, standings = null } = {}) {
 }
 
 function nextRace() {
+  if (game.phase === 'setup') return pendingSetup;
   const gp = game.gp;
   if (!gp.active) return restartRace();
   if (gp.index + 1 < gp.cup.length) {
@@ -415,6 +481,7 @@ function nextRace() {
 }
 
 function restartRace() {
+  if (game.phase === 'setup') return pendingSetup;
   const o = lastRaceOpts;
   if (!o) return startRace({});
   if (o.mode === 'gp' && gpSnapshot) {
@@ -493,13 +560,13 @@ function toggleMute() {
   setSetting('muted', !game.settings.muted);
 }
 
-game.api = { startRace, startGP, nextRace, restartRace, quitToTitle, setPaused, setMenuScreen, setSelection, skipCinematic, unlockAudio, setSetting, toggleMute };
+game.api = { startRace, startGP, nextRace, restartRace, quitToTitle, setPaused, setMenuScreen, setSelection, skipCinematic, unlockAudio, setSetting, toggleMute, getBest };
 
 // ---------------------------------------------------------------------------------------------
 // fixed step (§10 order)
 
 function shouldStep() {
-  return STEP_PHASES.has(game.phase) && !game.paused && !!game.race && !!game.track;
+  return STEP_PHASES.has(game.phase) && !game.paused && !game.contextLost && !!game.race && !!game.track;
 }
 
 function stepSim(dt) {
@@ -675,9 +742,18 @@ function installWindowHooks() {
   window.addEventListener('pointerdown', (e) => {
     if (e.pointerType === 'touch' && !sawTouch) { sawTouch = true; game.touch = resolveTouch(); game.input.device = 'touch'; }
   }, true);
-  const ro = new ResizeObserver(() => game.renderer.resize());
-  ro.observe(root);
+  if (typeof ResizeObserver === 'function') new ResizeObserver(() => game.renderer.resize()).observe(root);
   window.addEventListener('resize', () => game.renderer.resize());
+  // Nothing draws while the context is lost: stop the race clock and open the pause menu. After a
+  // restore the race stays paused until the player resumes.
+  const canvas = game.renderer.domElement;
+  canvas.addEventListener('webglcontextlost', (e) => {
+    e.preventDefault();
+    game.contextLost = true;
+    if (game.track) contextLostDuringRace = true;
+    setPaused(true);
+  });
+  canvas.addEventListener('webglcontextrestored', () => { game.contextLost = false; });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -735,4 +811,25 @@ function boot() {
   test.ready();
 }
 
-boot();
+// Any throw during boot leaves a half-built page: say so on the boot card, above the canvas and UI.
+function showBootFailure(e) {
+  console.error('[boot] failed', e);
+  game.loop?.stop();
+  let card = document.getElementById('kk-boot');
+  if (!card) {
+    card = document.createElement('div');
+    card.id = 'kk-boot';
+  }
+  card.dataset.failed = 'boot';
+  root.appendChild(card);
+  const reason = String((e && e.message) || e || '').slice(0, 120);
+  const small = document.createElement('small');
+  small.textContent = `Oyun başlatılamadı: ${reason}`;
+  card.replaceChildren('Kâğıt Kart', small);
+}
+
+try {
+  boot();
+} catch (e) {
+  showBootFailure(e);
+}

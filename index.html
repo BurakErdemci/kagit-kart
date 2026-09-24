@@ -10,10 +10,20 @@
   body { background: #efe6cf; overflow: hidden; }
   #kk-root { position: fixed; inset: 0; overflow: hidden; background: #efe6cf; }
   #kk-root canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; outline: none; }
-  #kk-boot { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) rotate(-1.5deg);
+  #kk-boot { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) rotate(-1.5deg); z-index: 20;
     padding: 22px 34px; background: #fbf6e9; color: #2d2a32; border: 2px solid #2d2a32;
     box-shadow: 6px 6px 0 #2d2a32; font: 800 28px system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; text-align: center; }
   #kk-boot small { display: block; font: 700 14px system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; opacity: .7; margin-top: 4px; }
 </style>
 <div id="kk-root"><div id="kk-boot">Kâğıt Kart<small>sayfalar açılıyor…</small></div></div>
+<script>
+  // A module graph that fails to load (CDN unreachable) or to link (no import maps) never runs main.js.
+  addEventListener('error', function (e) {
+    var card = document.getElementById('kk-boot');
+    if (!card || card.dataset.failed || (window.__kk && window.__kk.ready)) return;
+    if (e.target && e.target.tagName !== 'SCRIPT' && e.target !== window) return;
+    card.dataset.failed = 'load';
+    card.lastChild.textContent = 'Oyun yüklenemedi. Bağlantını kontrol edip sayfayı yenile.';
+  }, true);
+</script>
 <script type="module" src="./src/main.js"></script>

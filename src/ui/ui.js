@@ -61,13 +61,8 @@ export function createUI(game) {
     cup: () => (Array.isArray(CUP) && CUP.length ? CUP : Object.keys(TRACKS || {})),
     best(trackId) {
       const q = { track: trackId, cls: String(game.selection?.cls ?? '120'), character: game.selection?.characterId || 'tilki' };
-      const fn = game.api?.getBest;
-      if (typeof fn === 'function') {
-        try { return fn.call(game.api, q) || null; } catch { return null; }
-      }
-      // Fallback until core exposes api.getBest: core keeps TT bests under tt:<track>:<cls>:<character>.
-      const b = ctx.store.get(`tt:${q.track}:${q.cls}:${q.character}`, null);
-      return b && (b.bestLap || b.bestRace) ? { lap: b.bestLap ?? null, race: b.bestRace ?? null } : null;
+      // Core validates stored records; UI never reads them from storage itself.
+      try { return game.api?.getBest?.(q) || null; } catch { return null; }
     },
     fmt: fmtTime,
     prevStandings: () => prevStandings,

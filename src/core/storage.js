@@ -58,7 +58,18 @@ export function createStorage() {
         try { store.setItem(k, json); return true; } catch { /* quota counted differently: strip more */ }
       }
     }
-    try { store.setItem(k, json); return true; } catch { return false; }
+    try { store.setItem(k, json); return true; } catch { /* the write's own ghost is too big */ }
+    // A new time-trial record whose own ghost does not fit still keeps its times.
+    if (!k.startsWith(TT_PREFIX)) return false;
+    try {
+      const rec = JSON.parse(json);
+      if (!rec || typeof rec !== 'object' || !('ghost' in rec)) return false;
+      delete rec.ghost;
+      store.setItem(k, JSON.stringify(rec));
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   function set(key, value) {

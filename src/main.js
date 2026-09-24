@@ -307,6 +307,7 @@ function startRace(opts = {}) {
   if (game.phase === 'setup') return pendingSetup;
   const o = normalizeOpts(opts);
   const token = ++raceToken;
+  awayDuringSetup = lostDuringSetup = false;
   setPhase('setup');
   pendingSetup = setupRace(o, token).catch((e) => {
     // A failed setup must not leave every race entry ignored behind 'setup'.
@@ -428,6 +429,9 @@ async function setupRace(o, token) {
   }
   game.cameraRig.snap();
   setPhase('countdown');
+  // A blur, hide or context loss during setup or the intro had no race to pause yet.
+  if (awayDuringSetup || lostDuringSetup || document.hidden || game.contextLost) setPaused(true);
+  awayDuringSetup = lostDuringSetup = false;
   events.emit('countdown', { n: 3 });
 }
 
@@ -705,18 +709,25 @@ function disarmUnlock() {
   for (const e of UNLOCK_EVENTS) window.removeEventListener(e, onGesture, true);
 }
 
+// Set while the race is being prepared; the countdown turns them into a pause.
+let awayDuringSetup = false;
+let lostDuringSetup = false;
+const preparing = () => game.phase === 'setup' || game.phase === 'intro';
+
 function autoPauseNow() {
   if (!game.autoPause) return;
   if (game.phase === 'countdown' || game.phase === 'race') setPaused(true);
+  else if (preparing()) awayDuringSetup = true;
 }
 
 function installWindowHooks() {
   armUnlock();
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) autoPauseNow();
-    else armUnlock();
+    else { armUnlock(); awayDuringSetup = false; }
   });
   window.addEventListener('blur', autoPauseNow);
+  window.addEventListener('focus', () => { awayDuringSetup = false; });
   window.addEventListener('gamepaddisconnected', autoPauseNow);
   window.addEventListener('pointerdown', (e) => {
     if (e.pointerType === 'touch' && !sawTouch) { sawTouch = true; game.touch = resolveTouch(); game.input.device = 'touch'; }
@@ -730,6 +741,7 @@ function installWindowHooks() {
     e.preventDefault();
     game.contextLost = true;
     if (game.track) contextLostDuringRace = true;
+    if (preparing()) lostDuringSetup = true;
     setPaused(true);
   });
   canvas.addEventListener('webglcontextrestored', () => { game.contextLost = false; });

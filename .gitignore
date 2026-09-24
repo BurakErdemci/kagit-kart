@@ -2,3 +2,4 @@ tools/out/
 node_modules/
 .claude/
 *.log
+__pycache__/

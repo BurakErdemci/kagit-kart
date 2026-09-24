@@ -227,7 +227,7 @@ export function createResults(ctx) {
       [last ? 'Ödül törenine geç' : `Sonraki bölüm: ${nextName}`, () => ctx.api('nextRace'), true],
       ['Menüye dön', () => ctx.api('quitToTitle')],
     ];
-    board({ kicker: `Grand Prix · ${idx + 1}/${total} bölüm sonrası`, title: 'Kupa sıralaması', table, actions, cls: 'kk-std' });
+    board({ kicker: `GRAND PRIX · ${idx + 1}/${total} bölüm sonrası`, title: 'Kupa sıralaması', table, actions, cls: 'kk-std' });
   }
 
   return {

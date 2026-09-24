@@ -178,7 +178,7 @@ export function createUI(game) {
     } else if (isMenu) {
       if (prev === 'title') menus.openCover();
       else menus.setCoverInstant(true);
-      menus.show(next.slice(5));
+      menus.show(next.slice(5), { late: prev === 'title' });
     } else {
       menus.hide();
       menus.coverWrap.hidden = true;

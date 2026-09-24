@@ -32,7 +32,7 @@ export function createHints(ctx) {
   function show(key) {
     seen = { ...seen, [key]: true };
     ctx.store.set('uiHints', seen);
-    const note = h('div', { class: 'kk-hint' }, h('div', { class: 'kk-hint-in' }, h('i', { class: 'kk-tape' }),
+    const note = h('div', { class: key === 'portrait' ? 'kk-hint kk-hint-top' : 'kk-hint' }, h('div', { class: 'kk-hint-in' }, h('i', { class: 'kk-tape' }),
       sheet(TEXT[key](ctx.device()), { dk: 4 })));
     el.appendChild(note);
     ctx.glyphs(note);
@@ -110,7 +110,8 @@ export function createHints(ctx) {
         if (current.t <= 0) { current.el.remove(); current = null; }
       }
       const canShow = view === 'race' || (queue[0] === 'portrait' && view !== 'none');
-      if (!current && queue.length && canShow && !game.paused) show(queue.shift());
+      // a contextual hint waits for the first-race controls card to go: on a phone they would overlap
+      if (!current && queue.length && canShow && !game.paused && !teach) show(queue.shift());
     },
     dispose() { unbind(); },
   };

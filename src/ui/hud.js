@@ -146,8 +146,9 @@ export function createHUD(ctx) {
     for (let i = 0; i < n; i += step) d += `${i ? 'L' : 'M'}${((S.px[i] - minX) * sc + ox).toFixed(2)} ${((S.pz[i] - minZ) * sc + oz).toFixed(2)}`;
     d += 'Z';
     const ink = '#3b3742';
+    // an opaque printed card: the road is a flat kraft plate, the key line printed a little off it
     mapSvg.append(
-      s('path', { d, fill: 'none', stroke: ink, 'stroke-opacity': '.16', 'stroke-width': Math.max(2.5, hw * 2 * sc).toFixed(2), 'stroke-linejoin': 'round' }),
+      s('path', { d, fill: 'none', stroke: '#d9c59a', 'stroke-width': Math.max(2.5, hw * 2 * sc).toFixed(2), 'stroke-linejoin': 'round', transform: 'translate(-.5 .6)' }),
       s('path', { d, fill: 'none', stroke: ink, 'stroke-width': '1.3', 'stroke-linejoin': 'round', 'stroke-opacity': '.9' }),
       s('path', { d, fill: 'none', stroke: ink, 'stroke-width': '.7', 'stroke-opacity': '.4', transform: 'translate(.9 -.6)' }));
     const si = Math.round((track.startDist || 0) / (track.spacing || 1)) % n;

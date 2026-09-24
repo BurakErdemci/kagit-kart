@@ -67,10 +67,15 @@ ${dkFine}
 .kk-focusable.is-focus .kk-ribbon{transform:scaleY(1)}
 
 /* pop-up entrance: cards fold up from a hinge on the page */
-@keyframes kk-popup{0%{transform:perspective(60em) rotateX(-92deg)}55%{transform:perspective(60em) rotateX(9deg)}
+@keyframes kk-popup{0%{transform:perspective(60em) rotateX(-92deg); opacity:0}10%{opacity:1}55%{transform:perspective(60em) rotateX(9deg)}
   78%{transform:perspective(60em) rotateX(-3deg)}100%{transform:perspective(60em) rotateX(0)}}
 @keyframes kk-fold{to{transform:perspective(60em) rotateX(-92deg)}}
-.kk-pop{transform-origin:50% 100%; animation:kk-popup .62s cubic-bezier(.25,.8,.3,1) both}
+.kk-pop{transform-origin:50% 100%; animation:kk-popup .62s cubic-bezier(.25,.8,.3,1) var(--d, 0ms) both}
+/* the first screen after the title waits for the book's cover to land */
+.kk-late .kk-pop{animation-delay:calc(var(--d, 0ms) + .8s)}
+@keyframes kk-fadein{from{opacity:0}}
+.kk-late .kk-steps{animation:kk-fadein .3s .9s both}
+.kk-rm .kk-late .kk-steps{animation:none}
 .kk-folding .kk-pop{animation:kk-fold .16s ease-in both}
 .kk-rm .kk-pop, .kk-rm .kk-folding .kk-pop{animation:none}
 
@@ -87,48 +92,17 @@ ${dkFine}
   border-radius:.2em; box-shadow:.14em .16em 0 rgba(45,42,50,.5)}
 .kk-touch-ui .kk-prompts{display:none}
 
-/* ---------------------------------------------------------------- title cover */
-.kk-coverwrap{position:absolute; inset:0; perspective:1800px; perspective-origin:30% 50%; pointer-events:auto; cursor:pointer}
-.kk-cover{position:absolute; inset:0; transform-origin:0 50%; transform-style:preserve-3d; overflow:hidden;
-  background:
-    radial-gradient(120% 90% at 50% 45%, transparent 55%, rgba(0,0,0,.34)),
-    repeating-linear-gradient(0deg, rgba(255,255,255,.035) 0 1px, transparent 1px 3px),
-    repeating-linear-gradient(90deg, rgba(0,0,0,.09) 0 1px, transparent 1px 3px),
-    repeating-linear-gradient(45deg, rgba(255,255,255,.02) 0 2px, transparent 2px 5px),
-    var(--cloth)}
-.kk-cover-shade{position:absolute; inset:0; background:linear-gradient(90deg, rgba(0,0,0,.5), rgba(0,0,0,0) 60%); opacity:0; pointer-events:none}
-.kk-hinge{position:absolute; top:0; bottom:0; left:0; width:5.2%;
-  background:linear-gradient(90deg, var(--cloth-lo), var(--cloth) 70%, rgba(0,0,0,.35) 88%, var(--cloth-hi) 94%, var(--cloth) 100%)}
-.kk-frame{position:absolute; inset:5.5% 6% 5.5% 10%; border:.18em solid rgba(20,38,43,.85);
-  box-shadow:.1em .1em 0 rgba(255,255,255,.1), inset .1em .1em 0 rgba(255,255,255,.1)}
-.kk-frame::before{content:''; position:absolute; inset:.7em; border:.08em solid rgba(20,38,43,.75); box-shadow:.08em .08em 0 rgba(255,255,255,.08)}
-.kk-corner{position:absolute; width:4.5em; height:4.5em; border:.18em solid rgba(216,173,76,.55); border-radius:50%}
-.kk-cover-inner{position:absolute; inset:5.5% 6% 5.5% 10%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1.1em}
-.kk-cover-kicker{font:800 .95em var(--fb); letter-spacing:.42em; color:var(--gold); opacity:.85;
-  filter:drop-shadow(0 -1px 0 rgba(0,0,0,.5)) drop-shadow(0 1px 0 rgba(255,255,255,.12))}
-.kk-cover-title{font-size:8em; line-height:1; white-space:nowrap}
-.kk-cover-rule{width:14em; height:.9em}
-.kk-cover-emblem{width:9em; height:5em; opacity:.95}
-.kk-cover-cta{margin-top:1.2em; transform:rotate(-1.2deg)}
-.kk-cover-cta .kk-paper{padding:.6em 1.6em .7em; font:800 1.25em var(--fb); letter-spacing:.02em; display:flex; gap:.8em; align-items:center}
-.kk-cover-cta .kk-sheet{animation:kk-breathe 2.4s ease-in-out infinite}
-@keyframes kk-breathe{50%{transform:translateY(-.18em)}}
-.kk-rm .kk-cover-cta .kk-sheet{animation:none}
-.kk-bookmark{position:absolute; top:-1%; right:8.5%; width:3.4em; height:44%; transform-origin:50% 0; transform:rotate(2.5deg);
-  animation:kk-sway 5s ease-in-out infinite; filter:drop-shadow(.3em .35em 0 rgba(8,20,24,.55))}
-.kk-bookmark i{position:absolute; inset:0; clip-path:polygon(0 0,100% 0,100% 100%,50% 91%,0 100%);
-  background:linear-gradient(90deg, #a52f27, #d9483b 30%, #ef7c6f 46%, #d9483b 60%, #b3362d)}
-.kk-bookmark i::after{content:''; position:absolute; inset:0 .45em; border-left:.08em dashed rgba(255,230,210,.5); border-right:.08em dashed rgba(255,230,210,.5)}
-@keyframes kk-sway{50%{transform:rotate(1deg)}}
-.kk-rm .kk-bookmark{animation:none}
-.kk-cover.is-opening{animation:kk-open .9s cubic-bezier(.55,.02,.4,1) forwards}
-.kk-cover.is-opening .kk-cover-shade{animation:kk-shade .9s forwards}
-.kk-cover.is-closing{animation:kk-open .7s cubic-bezier(.4,0,.3,1) reverse both}
-@keyframes kk-open{0%{transform:rotateY(0)}100%{transform:rotateY(-104deg)}}
-@keyframes kk-shade{to{opacity:1}}
-.kk-coverwrap.is-open{opacity:0; visibility:hidden; transition:opacity .2s .75s, visibility 0s .95s}
-.kk-rm .kk-cover.is-opening, .kk-rm .kk-cover.is-closing{animation:none}
-.kk-rm .kk-coverwrap.is-open{transition:none}
+/* ---------------------------------------------------------------- title: the 3D book is the cover */
+.kk-coverwrap{position:absolute; inset:0; pointer-events:auto; cursor:pointer}
+.kk-sr{position:absolute; width:1px; height:1px; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap}
+.kk-cover-cta{position:absolute; left:50%; bottom:calc(6.5% + var(--sab)); translate:-50% 0; rotate:-1.4deg;
+  transform-origin:50% 100%; animation:kk-popup .62s cubic-bezier(.25,.8,.3,1) .5s both}
+.kk-cover-cta .kk-paper{padding:.65em 1.6em .75em; font:800 1.3em var(--fb); letter-spacing:.02em; display:flex; gap:.8em; align-items:center; white-space:nowrap}
+.kk-cover-cta .kk-tape{position:absolute; left:50%; top:-.75em; width:4.8em; height:1.5em; margin-left:-2.4em; z-index:2;
+  background:rgba(242,193,78,.72); transform:rotate(-4deg); box-shadow:.08em .1em 0 rgba(45,42,50,.18)}
+.kk-cover-cta.is-away{animation:kk-fold .24s ease-in both}
+.kk-cover-cta.is-back{animation:kk-popup .62s cubic-bezier(.25,.8,.3,1) 1.35s both}
+.kk-rm .kk-cover-cta, .kk-rm .kk-cover-cta.is-away, .kk-rm .kk-cover-cta.is-back{animation:none}
 
 /* ---------------------------------------------------------------- menu chrome */
 .kk-screen{position:absolute; inset:0; pointer-events:none}
@@ -303,8 +277,8 @@ ${dkFine}
 @keyframes kk-stamp{0%{transform:rotate(-9deg) scale(1.25)}100%{transform:rotate(-3.5deg) scale(1)}}
 .kk-rm .kk-place.is-stamp{animation:none}
 
-.kk-map{position:relative; width:14em; height:14em; transform:rotate(1.5deg)}
-.kk-map .kk-paper{position:absolute; inset:0; background:rgba(243,234,211,.62)}
+.kk-map{position:relative; width:12.5em; height:12.5em; transform:rotate(1.5deg); filter:drop-shadow(.14em .18em 0 rgba(45,42,50,.78))}
+.kk-map .kk-paper{position:absolute; inset:0}
 .kk-map svg{position:absolute; inset:.6em; width:calc(100% - 1.2em); height:calc(100% - 1.2em); overflow:visible}
 
 .kk-center{position:absolute; left:50%; top:22%; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; gap:.8em}
@@ -514,7 +488,6 @@ ${dkFine}
   .kk-count-num{font-size:10em} .kk-count-num.is-go{font-size:6.5em}
   .kk-banner{font-size:2.6em} .kk-center{top:14%}
   .kk-intro{min-width:22em; bottom:calc(1.6em + var(--sab))}
-  .kk-cover-title{font-size:6.2em} .kk-cover-cta{margin-top:.4em}
   .kk-pause{width:23em} .kk-pause>.kk-sheet>.kk-paper{padding:1em 1.5em 1.1em} .kk-tocrow{padding:.32em .4em .32em 1.2em; font-size:1.1em}
   .kk-podium-head .kk-h{font-size:2.4em}
   .kk-flip b{display:none}
@@ -535,17 +508,31 @@ ${dkFine}
   .kk-row{flex-direction:column; align-items:center; bottom:calc(2em + var(--sab)); gap:1em}
   .kk-card{width:min(24em, 86vw)} .kk-card .kk-paper{min-height:0} .kk-art{height:4.6em} .kk-art .kk-svg{width:4.4em; height:4.4em}
   .kk-roster{flex-wrap:wrap; padding:0 1em} .kk-charinfo{width:calc(100% - 6em)}
-  .kk-steps{display:none} .kk-cover-title{font-size:4.2em}
+  .kk-steps{display:none}
   .kk-board .kk-tr{grid-template-columns:2.4em 2em 1fr 5.4em 0 3.6em}
-  .kk-bookmark{right:3%; height:30%}
   .kk-mini{top:calc(9.4em + var(--sat)); right:auto; left:calc(3em + var(--sal))}
   .kk-touch-race .kk-tauto{left:calc(1em + var(--sal)); top:calc(11.4em + var(--sat))}
   /* portrait race: the top row only fits slot, place and lap; pause goes under the lap panel, the map below it */
   .kk-touch-race .kk-tpause{left:auto; right:calc(1.2em + var(--sar)); top:calc(6.4em + var(--sat)); margin-left:0}
   .kk-touch-race .kk-hud-bl{top:calc(11em + var(--sat))}
-  .kk-touch-race .kk-teach{top:calc(20.5em + var(--sat)); width:calc(100% - 2em)}
+  /* the controls card sits under the top row, the countdown numerals below it over the road */
+  .kk-touch-race .kk-teach{top:calc(16.5em + var(--sat)); width:calc(100% - 2em)}
+  .kk-center{top:44%}
+  /* podium captions: a column at the lower left, the go button stays at the lower right */
+  .kk-podium{left:calc(1em + var(--sal)); right:auto; bottom:calc(6em + var(--sab)); flex-direction:column; align-items:flex-start; gap:.6em}
+  .kk-cap.c1{order:1; translate:none} .kk-cap.c2{order:2} .kk-cap.c3{order:3}
   .kk-touch-race .kk-hint, .kk-hint{bottom:auto; top:32%}
   .kk-track{width:14em}
+  /* the turn-your-phone note sits over the desk above the book, never across the cover's title */
+  .kk-hint.kk-hint-top{top:calc(1.4em + var(--sat)); max-width:calc(100% - 2em)}
+  /* track select: tabs down the right edge at the top, the chapter card full width along the bottom */
+  .kk-chapters{top:calc(9.6em + var(--sat))}
+  .kk-chtab{width:15em; translate:1.1em 0} .kk-chtab.is-focus{translate:0 0}
+  .kk-chapter{left:calc(1em + var(--sal)); right:calc(1em + var(--sar)); bottom:calc(1.6em + var(--sab)); width:auto; max-width:none; rotate:-.6deg}
+  .kk-chapter .kk-paper{padding:1em 1.2em 1.1em; grid-template-columns:minmax(0,1fr) 7em; gap:.8em}
+  .kk-chapter .kk-svg{width:7em; height:7em}
+  .kk-chapter .kk-h{font-size:2.1em}
+  .kk-chapter .kk-kicker{white-space:nowrap}
 }
 `;
 }

@@ -49,7 +49,7 @@ const game = {
   race: null,
   gp: { active: false, cup: CUP.slice(), index: 0, standings: {}, lastPlaces: {}, totalTimes: {} },
   mode: 'single', cls: '120',
-  selection: { characterId: 'tilki', trackId: CUP[0], cls: '120', mode: 'single' },
+  selection: { characterId: 'tilki', trackId: CUP[0], cls: '120', mode: 'gp' },
   systems: { ai: null, items: null, audio: null, ui: null, scenery: null, fx: null, cinematics: null },
   api: null,
   // core extras

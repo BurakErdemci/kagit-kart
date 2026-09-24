@@ -186,7 +186,7 @@ export function createPodium(game, stage) {
       group.add(holder);
       visual.setEmotion('idle');
       const land = reducedMotion ? 1.6 : landAt[place];
-      karts.push({ visual, holder, place, top: blk.top, land, fall: reducedMotion ? 0 : 0.55, landed: false, sq: 1, sqv: 0 });
+      karts.push({ visual, holder, place, top: blk.top, land, landed: false, sq: 0, sqv: 0 });
     });
     if (sadId && !top3.some((e) => e.characterId === sadId)) {
       const ch = ROSTER.find((c) => c.id === sadId);
@@ -201,7 +201,7 @@ export function createPodium(game, stage) {
         holder.visible = false;
         group.add(holder);
         visual.setEmotion('sad');
-        karts.push({ visual, holder, place: 0, top: holder.position.y, land: 1.2, fall: 0, landed: false, sq: 1, sqv: 0, sad: true });
+        karts.push({ visual, holder, place: 0, top: holder.position.y, land: 1.2, landed: false, sq: 0, sqv: 0, sad: true });
       }
     }
     script = [
@@ -220,25 +220,18 @@ export function createPodium(game, stage) {
     t += dt;
     for (const s of script) if (!s.done && t >= s.at) { s.done = true; s.run(); }
     batch.update(dt, rm);
+    // Each kart rises out of its step like the pop-ups around it: hinged at the step top, springing
+    // upright with an overshoot (a drop from above read as a kart hanging upside down under the camera).
     for (const k of karts) {
-      const start = k.land - k.fall;
-      if (t < start) { k.holder.visible = false; continue; }
-      k.holder.visible = true;
+      if (t < k.land) { k.holder.visible = false; continue; }
       if (!k.landed) {
-        if (t >= k.land) {
-          k.landed = true;
-          k.holder.position.y = k.top;
-          if (!k.sad) {
-            k.visual.setEmotion('cheer');
-            if (!rm && k.fall > 0) { k.sq = 0.7; k.sqv = 0; }
-          }
-        } else {
-          const f = (t - start) / Math.max(1e-3, k.fall);
-          k.holder.position.y = k.top + 5 * (1 - f * f);
-        }
+        k.landed = true;
+        k.holder.position.y = k.top;
+        if (!k.sad) k.visual.setEmotion('cheer');
+        if (rm) k.sq = 1;
       }
       if (k.sq !== 1 || k.sqv !== 0) {
-        const w = Math.PI * 2 * 3, z = 0.35;
+        const w = Math.PI * 2 * 2.4, z = 0.42;
         let left = dt;
         while (left > 1e-6) {
           const h = Math.min(left, 1 / 120);
@@ -247,9 +240,11 @@ export function createPodium(game, stage) {
           left -= h;
         }
         if (Math.abs(1 - k.sq) < 1e-3 && Math.abs(k.sqv) < 1e-2) { k.sq = 1; k.sqv = 0; }
-        const w2 = 1 + (1 - k.sq) * 0.5;
-        k.holder.scale.set(w2, k.sq, w2);
       }
+      const s = Math.max(0.001, k.sq);
+      const w2 = 0.82 + 0.18 * Math.min(1, s);
+      k.holder.scale.set(w2, s, w2);
+      k.holder.visible = s > 0.01;
       k.visual.update(dt, 1);
     }
     updateConfetti(dt, rm);
